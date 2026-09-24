@@ -35,11 +35,13 @@ def main() -> None:
         )
         _history, final_result = train(cfg)
 
-        assert final_result is not None, "no final evaluation produced (calib_fraction <= 0?)"
+        assert final_result is not None, (
+            "no final evaluation produced (calib_fraction <= 0?)"
+        )
         assert np.isfinite(final_result["raw"]["ece"]), "raw ECE is not finite"
-        assert np.isfinite(
-            final_result["post_temperature"]["ece"]
-        ), "post-temperature ECE is not finite"
+        assert np.isfinite(final_result["post_temperature"]["ece"]), (
+            "post-temperature ECE is not finite"
+        )
         print("\nsmoke test: PASS")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

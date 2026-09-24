@@ -58,7 +58,9 @@ def infer(
     device = detect_device()
     model, cfg, tokenizer = load_model(ckpt_path, device)
 
-    ids, markers = build_sequence(tokenizer, state, question, cfg.max_len, cfg.head_max_len)
+    ids, markers = build_sequence(
+        tokenizer, state, question, cfg.max_len, cfg.head_max_len
+    )
     ids_t = torch.tensor([ids], dtype=torch.long, device=device)
     attention_mask = torch.ones_like(ids_t)
     marker_pos = torch.tensor([markers], dtype=torch.long, device=device)
@@ -93,7 +95,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=Path, required=True)
     parser.add_argument("--state", type=str, required=True, help="JSON state blob")
-    parser.add_argument("--question", type=str, required=True, help="JSON question dict")
+    parser.add_argument(
+        "--question", type=str, required=True, help="JSON question dict"
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     infer(args.ckpt, args.state, json.loads(args.question), args.out)

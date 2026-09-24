@@ -26,7 +26,9 @@ from src.utils.model_utils import detect_device  # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ckpt", type=Path, required=True)
-    parser.add_argument("--dataset_name", type=str, default="LocalLLaMA/typed-decisions")
+    parser.add_argument(
+        "--dataset_name", type=str, default="LocalLLaMA/typed-decisions"
+    )
     parser.add_argument("--dataset_config", type=str, default="all")
     parser.add_argument("--calib_fraction", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=16)
@@ -50,7 +52,9 @@ def main() -> None:
     if calib_loader is None:
         raise RuntimeError("--calib_fraction must be > 0 to fit temperature")
 
-    result = evaluate(model, calib_loader, test_loader, device, save_json_path=args.json)
+    result = evaluate(
+        model, calib_loader, test_loader, device, save_json_path=args.json
+    )
     print(format_report(result))
 
     if args.json:

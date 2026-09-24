@@ -101,9 +101,13 @@ def test_build_sequence_truncates_under_tight_option_budget(dummy_tokenizer):
     many_options_q = {
         "type": "choice",
         "instructions": "Pick one of many.",
-        "criteria": {f"opt{i}": f"a fairly long description of option {i}" for i in range(20)},
+        "criteria": {
+            f"opt{i}": f"a fairly long description of option {i}" for i in range(20)
+        },
     }
-    ids, markers = build_sequence(dummy_tokenizer, "state", many_options_q, head_max_len=32)
+    ids, markers = build_sequence(
+        dummy_tokenizer, "state", many_options_q, head_max_len=32
+    )
     assert len(markers) == 20
     # every marker must still land inside the sequence and on a mask token
     for m in markers:
@@ -156,7 +160,14 @@ def test_collate_fn_pads_variable_option_counts(dummy_tokenizer):
 
 
 def test_split_train_calib_deterministic():
-    cases = [make_hf_case(f"c{i}", {"q1": CHOICE_Q}, {"q1": {"probabilities": {"stop": 0.5, "go": 0.5}}}) for i in range(50)]
+    cases = [
+        make_hf_case(
+            f"c{i}",
+            {"q1": CHOICE_Q},
+            {"q1": {"probabilities": {"stop": 0.5, "go": 0.5}}},
+        )
+        for i in range(50)
+    ]
     hf_ds = HFDataset.from_list(cases)
 
     train1, calib1 = split_train_calib(hf_ds, calib_fraction=0.2, seed=0)
@@ -168,7 +179,11 @@ def test_split_train_calib_deterministic():
 
 
 def test_split_train_calib_disabled_returns_none():
-    cases = [make_hf_case("c0", {"q1": CHOICE_Q}, {"q1": {"probabilities": {"stop": 0.5, "go": 0.5}}})]
+    cases = [
+        make_hf_case(
+            "c0", {"q1": CHOICE_Q}, {"q1": {"probabilities": {"stop": 0.5, "go": 0.5}}}
+        )
+    ]
     hf_ds = HFDataset.from_list(cases)
     train, calib = split_train_calib(hf_ds, calib_fraction=0.0, seed=0)
     assert calib is None

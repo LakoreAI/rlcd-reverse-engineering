@@ -125,7 +125,9 @@ def run_baseline_replication() -> list[dict]:
                 "sharpness_max_p": sharpness(p),
             }
         )
-        print(f"[baseline] sigma={sigma}: p*={p.round(decimals=3).tolist()} target={t.tolist()}")
+        print(
+            f"[baseline] sigma={sigma}: p*={p.round(decimals=3).tolist()} target={t.tolist()}"
+        )
     return records
 
 
@@ -183,7 +185,12 @@ def run_k_sweep() -> list[dict]:
             for reward in ("log_only", "full"):
                 for sigma in (0.0, 0.5, 1.0, 2.0):
                     p = smoothed_optimum(
-                        t, sigma, reward=reward, is_score_type=False, steps=2000, batch=2048
+                        t,
+                        sigma,
+                        reward=reward,
+                        is_score_type=False,
+                        steps=2000,
+                        batch=2048,
                     )
                     records.append(
                         {

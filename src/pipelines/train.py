@@ -108,13 +108,17 @@ def build_loaders(
     if train_cfg.max_examples is not None:
         train_hf = train_hf.select(range(min(len(train_hf), train_cfg.max_examples)))
         test_hf = test_hf.select(range(min(len(test_hf), train_cfg.max_examples)))
-    train_hf, calib_hf = split_train_calib(train_hf, train_cfg.calib_fraction, train_cfg.seed)
+    train_hf, calib_hf = split_train_calib(
+        train_hf, train_cfg.calib_fraction, train_cfg.seed
+    )
 
     train_dataset = TypedDecisionDataset(
         train_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len
     )
     calib_dataset = (
-        TypedDecisionDataset(calib_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len)
+        TypedDecisionDataset(
+            calib_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len
+        )
         if calib_hf is not None
         else None
     )
@@ -161,7 +165,9 @@ def _sigma_at_epoch(train_cfg: TrainingConfig, epoch: int) -> float:
     if not train_cfg.anneal_sigma or train_cfg.epochs <= 1:
         return train_cfg.sigma_start
     progress = (epoch - 1) / (train_cfg.epochs - 1)
-    return train_cfg.sigma_start + progress * (train_cfg.sigma_end - train_cfg.sigma_start)
+    return train_cfg.sigma_start + progress * (
+        train_cfg.sigma_end - train_cfg.sigma_start
+    )
 
 
 def _optimizer_step(optimizer, callbacks, ctx, pending_losses, step, epoch, log_every):
@@ -413,7 +419,10 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_config", type=str, default=None)
     parser.add_argument("--calib_fraction", type=float, default=None)
     parser.add_argument(
-        "--max_examples", type=int, default=None, help="cap train/test to this many cases"
+        "--max_examples",
+        type=int,
+        default=None,
+        help="cap train/test to this many cases",
     )
     parser.add_argument("--ckpt_dir", type=str, default=None)
     parser.add_argument("--result_dir", type=str, default=None)

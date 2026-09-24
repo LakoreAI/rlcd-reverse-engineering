@@ -91,7 +91,7 @@ def build_sequence(
     # option markers (matches laya/common.py::build_sequence's same guard).
     instructions = str(question["instructions"]).replace(mask_str, " ")
     head_ids = tokenizer(
-        f'{question["type"]} question: {instructions}', add_special_tokens=False
+        f"{question['type']} question: {instructions}", add_special_tokens=False
     )["input_ids"]
 
     opts = []
@@ -113,7 +113,9 @@ def build_sequence(
         opts = [o[:per] for o in opts]
         budget = head_max_len - sum(len(o) for o in opts)
 
-    ids = [tokenizer.cls_token_id] + head_ids[: max(8, budget)] + [tokenizer.sep_token_id]
+    ids = (
+        [tokenizer.cls_token_id] + head_ids[: max(8, budget)] + [tokenizer.sep_token_id]
+    )
     markers = []
     for opt_ids in opts:
         markers.append(len(ids))
@@ -141,7 +143,9 @@ class TypedDecisionDataset(Dataset):
     length per row; use `collate_fn` to batch.
     """
 
-    def __init__(self, hf_dataset, tokenizer, max_len: int = 512, head_max_len: int = 192):
+    def __init__(
+        self, hf_dataset, tokenizer, max_len: int = 512, head_max_len: int = 192
+    ):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.head_max_len = head_max_len
@@ -169,7 +173,9 @@ class TypedDecisionDataset(Dataset):
         }
 
 
-def collate_fn(batch: list[dict[str, object]], pad_token_id: int) -> dict[str, torch.Tensor]:
+def collate_fn(
+    batch: list[dict[str, object]], pad_token_id: int
+) -> dict[str, torch.Tensor]:
     """Pad a list of `TypedDecisionDataset` rows to the batch's max sequence
     length / option count. Returns tensors keyed `ids`, `attention_mask`,
     `marker_pos`, `marker_mask`, `target`, `qtype` — the exact kwargs

@@ -76,7 +76,9 @@ def test_fit_temperature_recovers_scaling():
 
 
 def test_fit_temperatures_groups_by_qtype_and_bucket():
-    rows = [make_row(0, 2, seed=i) for i in range(10)] + [make_row(1, 8, seed=i + 100) for i in range(10)]
+    rows = [make_row(0, 2, seed=i) for i in range(10)] + [
+        make_row(1, 8, seed=i + 100) for i in range(10)
+    ]
     temps = fit_temperatures(rows)
     assert set(temps) == {(0, k_bucket(2)), (1, k_bucket(8))}
     for t in temps.values():
@@ -111,7 +113,9 @@ def make_encodable_row(qtype: int, k: int, seq_len: int = 12) -> dict:
     return {"ids": ids, "markers": markers, "target": target, "qtype": qtype}
 
 
-def make_loader(n_rows: int, qtype: int, k: int, batch_size: int = 4, pad_token_id: int = 0):
+def make_loader(
+    n_rows: int, qtype: int, k: int, batch_size: int = 4, pad_token_id: int = 0
+):
     rows = [make_encodable_row(qtype, k) for _ in range(n_rows)]
     return DataLoader(
         RowDataset(rows),

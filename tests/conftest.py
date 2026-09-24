@@ -19,7 +19,9 @@ class DummyTokenizer:
     sep_token_id = 3
     pad_token_id = 0
 
-    def __call__(self, text, add_special_tokens=True, truncation=False, max_length=None):
+    def __call__(
+        self, text, add_special_tokens=True, truncation=False, max_length=None
+    ):
         ids = [10 + (hash(word) % 50) for word in text.split()] or [10]
         if truncation and max_length is not None:
             ids = ids[:max_length]

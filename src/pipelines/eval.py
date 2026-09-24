@@ -182,7 +182,9 @@ def apply_temperature(
 
 
 @torch.no_grad()
-def eval_per_epoch(model: DecisionModel, loader, device: torch.device) -> dict[str, object]:
+def eval_per_epoch(
+    model: DecisionModel, loader, device: torch.device
+) -> dict[str, object]:
     """Periodic-validation hook for `src.pipelines.train`. Reports only raw
     (pre-temperature) metrics under the `raw_*` keys `TrainerState.extra`
     expects (`best_metric: raw_ece` in `TrainingConfig`).
@@ -213,7 +215,9 @@ def evaluate(
     result = {
         "raw": raw_metrics(test_rows),
         "post_temperature": apply_temperature(test_rows, temperatures),
-        "fitted_temperature": {f"type{k[0]}_bucket{k[1]}": v for k, v in temperatures.items()},
+        "fitted_temperature": {
+            f"type{k[0]}_bucket{k[1]}": v for k, v in temperatures.items()
+        },
     }
     if save_json_path is not None:
         save_json(result, save_json_path)

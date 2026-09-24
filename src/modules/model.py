@@ -30,8 +30,10 @@ class DecisionModel(nn.Module):
     def __init__(self, cfg: DecisionModelConfig, encoder: nn.Module | None = None):
         super().__init__()
         self.cfg = cfg
-        self.encoder = encoder if encoder is not None else AutoModel.from_pretrained(
-            cfg.encoder_name
+        self.encoder = (
+            encoder
+            if encoder is not None
+            else AutoModel.from_pretrained(cfg.encoder_name)
         )
         d = self.encoder.config.hidden_size
         layer = nn.TransformerEncoderLayer(

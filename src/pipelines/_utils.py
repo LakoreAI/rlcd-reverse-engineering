@@ -94,7 +94,9 @@ def _forward_check(model: torch.nn.Module, batch: dict, device) -> str:
                 batch["qtype"].to(device),
             )
         model.train(was_training)
-        preview = " ".join(f"{v:+.3f}" for v in logits[0, : min(6, logits.shape[1])].tolist())
+        preview = " ".join(
+            f"{v:+.3f}" for v in logits[0, : min(6, logits.shape[1])].tolist()
+        )
         return f"logits {tuple(logits.shape)}\nlogits[0][:6] = [{preview}]"
     except Exception as e:  # noqa: BLE001 - a shape peek must never block training
         return f"forward check skipped: {e}"
@@ -104,7 +106,16 @@ def _forward_check(model: torch.nn.Module, batch: dict, device) -> str:
 
 
 def _announce_plain(
-    *, model, model_cfg, train_cfg, train_loader, train_dataset, device, run_name, ckpt_dir, result_dir
+    *,
+    model,
+    model_cfg,
+    train_cfg,
+    train_loader,
+    train_dataset,
+    device,
+    run_name,
+    ckpt_dir,
+    result_dir,
 ) -> None:
     print("\n" + "=" * WIDTH)
     print(f"RUN  {run_name}")
@@ -120,7 +131,10 @@ def _announce_plain(
 
     counts = qtype_counts(train_dataset)
     banner(f"data: train sample  ({len(train_dataset)} question-rows)")
-    print("qtype counts: " + "  ".join(f"{name}:{n}" for name, n in sorted(counts.items())))
+    print(
+        "qtype counts: "
+        + "  ".join(f"{name}:{n}" for name, n in sorted(counts.items()))
+    )
 
     batch = next(iter(train_loader))
     print(
@@ -145,7 +159,16 @@ def _announce_plain(
 
 
 def _announce_rich(
-    *, model, model_cfg, train_cfg, train_loader, train_dataset, device, run_name, ckpt_dir, result_dir
+    *,
+    model,
+    model_cfg,
+    train_cfg,
+    train_loader,
+    train_dataset,
+    device,
+    run_name,
+    ckpt_dir,
+    result_dir,
 ) -> None:
     console = Console(highlight=False)
     console.print()
@@ -193,9 +216,13 @@ def _announce_rich(
     model_table.add_column("component")
     model_table.add_column("params", justify="right")
     total = sum(p.numel() for p in model.parameters())
-    model_table.add_row("encoder", f"{sum(p.numel() for p in model.encoder.parameters()):,d}")
+    model_table.add_row(
+        "encoder", f"{sum(p.numel() for p in model.encoder.parameters()):,d}"
+    )
     model_table.add_row("head", f"{sum(p.numel() for p in model.head.parameters()):,d}")
-    model_table.add_row("scorer", f"{sum(p.numel() for p in model.scorer.parameters()):,d}")
+    model_table.add_row(
+        "scorer", f"{sum(p.numel() for p in model.scorer.parameters()):,d}"
+    )
     model_table.add_section()
     model_table.add_row("TOTAL", f"{total:,d}", style="bold")
     console.print(model_table)

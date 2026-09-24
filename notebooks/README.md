@@ -18,4 +18,3 @@ Run `uv sync` (and `uv run jupyter lab`) from the repo root, then open:
 These import the implementation from `src/` (and `experiments/`) rather than
 reimplementing it, so the notebooks stay thin and reproducible from the
 command line.
-

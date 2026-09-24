@@ -48,10 +48,14 @@ def test_qtype_counts(dummy_tokenizer):
     assert counts == {"choice": 1, "score": 1}
 
 
-def test_announce_training_prints_config_data_and_model(capsys, dummy_tokenizer, dummy_encoder):
+def test_announce_training_prints_config_data_and_model(
+    capsys, dummy_tokenizer, dummy_encoder
+):
     ds = make_dataset(dummy_tokenizer)
     loader = DataLoader(
-        ds, batch_size=2, collate_fn=partial(collate_fn, pad_token_id=dummy_tokenizer.pad_token_id)
+        ds,
+        batch_size=2,
+        collate_fn=partial(collate_fn, pad_token_id=dummy_tokenizer.pad_token_id),
     )
     cfg = DecisionModelConfig(head_layers=1)
     model = DecisionModel(cfg, encoder=dummy_encoder)

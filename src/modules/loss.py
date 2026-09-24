@@ -8,7 +8,6 @@ score, plus a soft-target cross-entropy term. `w_rl=0` gives CE-only;
 exactly these two weights (and `sigma`).
 """
 
-
 import torch
 import torch.nn.functional as F
 
@@ -97,7 +96,10 @@ def rlcd_loss(
     # (B, K) -> sum(-1): (B,) -> mean(): scalar
 
     total = w_rl * loss_rl + w_ce * loss_ce  # scalar
-    return total, {"loss_rl": float(loss_rl.detach()), "loss_ce": float(loss_ce.detach())}
+    return total, {
+        "loss_rl": float(loss_rl.detach()),
+        "loss_ce": float(loss_ce.detach()),
+    }
 
 
 @torch.no_grad()
