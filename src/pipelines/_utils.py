@@ -10,14 +10,15 @@ optional extra: `uv sync --extra rich`.
 """
 
 import json
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
 
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader
 
-from src.config import MLPConfig
+from src.config import DecisionModelConfig
+from src.data import TypedDecisionDataset
 from src.pipelines.config import TrainingConfig
 
 try:  # optional pretty-printing dependency
@@ -43,37 +44,23 @@ def indent(text: str, spaces: int = 2) -> str:
     return "\n".join(pad + line for line in text.splitlines())
 
 
-def label_counts(dataset: Dataset) -> Optional[torch.Tensor]:
-    """Per-class example counts when the dataset exposes labels, else None.
-
-    Handles both a `FeatureDataset` (`.y`) and a `Subset` wrapping one, so the
-    held-out split's distribution can be reported the same way as the full set.
-    """
-    base = dataset
-    if isinstance(dataset, Subset):
-        base = dataset.dataset
-        if hasattr(base, "y"):
-            idx = torch.as_tensor(dataset.indices, dtype=torch.long)
-            return torch.bincount(base.y[idx], minlength=base.num_classes)
-        return None
-    if hasattr(base, "y"):
-        return torch.bincount(base.y, minlength=base.num_classes)
-    return None
+def qtype_counts(dataset: TypedDecisionDataset) -> Counter:
+    """Question-type distribution — the typed-decision analogue of the
+    inherited scaffold's per-class label counts."""
+    return Counter(question["type"] for _state, question, _gold in dataset._rows)
 
 
 def announce_training(
     *,
     model: torch.nn.Module,
-    model_cfg: MLPConfig,
+    model_cfg: DecisionModelConfig,
     train_cfg: TrainingConfig,
     train_loader: DataLoader,
-    train_dataset: Dataset,
+    train_dataset: TypedDecisionDataset,
     device: torch.device,
     run_name: str,
     ckpt_dir: Path,
     result_dir: Path,
-    sample_rows: int = 3,
-    sample_cols: int = 8,
 ) -> None:
     """Print configs, a data sample, and the model layout before training."""
     common = dict(
@@ -86,8 +73,6 @@ def announce_training(
         run_name=run_name,
         ckpt_dir=ckpt_dir,
         result_dir=result_dir,
-        sample_rows=sample_rows,
-        sample_cols=sample_cols,
     )
     if _HAS_RICH:
         _announce_rich(**common)
@@ -95,22 +80,31 @@ def announce_training(
         _announce_plain(**common)
 
 
+def _forward_check(model: torch.nn.Module, batch: dict, device) -> str:
+    """A no-grad forward on a real batch; never raises."""
+    try:
+        was_training = model.training
+        model.eval()
+        with torch.no_grad():
+            logits = model(
+                batch["ids"].to(device),
+                batch["attention_mask"].to(device),
+                batch["marker_pos"].to(device),
+                batch["marker_mask"].to(device),
+                batch["qtype"].to(device),
+            )
+        model.train(was_training)
+        preview = " ".join(f"{v:+.3f}" for v in logits[0, : min(6, logits.shape[1])].tolist())
+        return f"logits {tuple(logits.shape)}\nlogits[0][:6] = [{preview}]"
+    except Exception as e:  # noqa: BLE001 - a shape peek must never block training
+        return f"forward check skipped: {e}"
+
+
 # --- plain-text fallback ------------------------------------------------------
 
 
 def _announce_plain(
-    *,
-    model,
-    model_cfg,
-    train_cfg,
-    train_loader,
-    train_dataset,
-    device,
-    run_name,
-    ckpt_dir,
-    result_dir,
-    sample_rows,
-    sample_cols,
+    *, model, model_cfg, train_cfg, train_loader, train_dataset, device, run_name, ckpt_dir, result_dir
 ) -> None:
     print("\n" + "=" * WIDTH)
     print(f"RUN  {run_name}")
@@ -119,84 +113,39 @@ def _announce_plain(
     print(f"checkpoints: {ckpt_dir}")
     print(f"results:     {result_dir}")
 
-    banner("model config (MLPConfig)")
+    banner("model config (DecisionModelConfig)")
     print(indent(json.dumps(asdict(model_cfg), indent=2, default=str)))
     banner("training config (TrainingConfig)")
     print(indent(json.dumps(asdict(train_cfg), indent=2, default=str)))
 
-    counts = label_counts(train_dataset)
-    banner(
-        f"data: train sample  ({len(train_dataset)} examples"
-        + (f", {counts.numel()} classes)" if counts is not None else ")")
-    )
-    if counts is not None:
-        summary = "  ".join(
-            f"{cls}:{int(n)}" for cls, n in enumerate(counts) if int(n) > 0
-        )
-        print(f"class counts: {summary}")
+    counts = qtype_counts(train_dataset)
+    banner(f"data: train sample  ({len(train_dataset)} question-rows)")
+    print("qtype counts: " + "  ".join(f"{name}:{n}" for name, n in sorted(counts.items())))
 
-    x, y = next(iter(train_loader))
-    print(f"batch: x {tuple(x.shape)} {x.dtype}   y {tuple(y.shape)} {y.dtype}")
-    rows = min(sample_rows, x.shape[0])
-    cols = min(sample_cols, x.shape[1])
-    for r in range(rows):
-        values = " ".join(f"{v:+.3f}" for v in x[r, :cols].tolist())
-        tail = " ..." if x.shape[1] > cols else ""
-        print(f"  x[{r}][:{cols}] = [{values}{tail}]   y={int(y[r])}")
+    batch = next(iter(train_loader))
+    print(
+        f"batch: ids {tuple(batch['ids'].shape)}   "
+        f"markers {tuple(batch['marker_pos'].shape)}   "
+        f"target {tuple(batch['target'].shape)}"
+    )
 
     banner(f"model: {type(model).__name__}")
     total = 0
     for name, param in model.named_parameters():
         total += param.numel()
-        print(f"  {name:<34s} {str(tuple(param.shape)):>16s}  {param.numel():>10,d}")
-    print(f"  {'TOTAL':<34s} {'':>16s}  {total:>10,d}")
-    largest = max(model.parameters(), key=lambda p: p.numel())
-    print(
-        f"initial weights of {largest.shape}: "
-        f"mean={largest.mean():+.4f}  std={largest.std():.4f}"
-    )
+    print(f"  {'TOTAL params':<34s} {total:>14,d}")
 
     banner("forward check (untrained)")
-    print(_forward_check(model, x, device))
+    print(_forward_check(model, batch, device))
 
     print("\n" + "=" * WIDTH + "\n")
-
-
-def _forward_check(model: torch.nn.Module, x: torch.Tensor, device) -> str:
-    """A no-grad forward on a real batch; never raises."""
-    try:
-        was_training = model.training
-        model.eval()
-        with torch.no_grad():
-            logits, feature = model(x.to(device))
-        model.train(was_training)
-        preview = " ".join(
-            f"{v:+.3f}" for v in logits[0, : min(6, logits.shape[1])].tolist()
-        )
-        return (
-            f"x {tuple(x.shape)} -> logits {tuple(logits.shape)}  "
-            f"feature {tuple(feature.shape)}\nlogits[0][:6] = [{preview}]"
-        )
-    except Exception as e:  # noqa: BLE001 - a shape peek must never block training
-        return f"forward check skipped: {e}"
 
 
 # --- rich rendering -----------------------------------------------------------
 
 
 def _announce_rich(
-    *,
-    model,
-    model_cfg,
-    train_cfg,
-    train_loader,
-    train_dataset,
-    device,
-    run_name,
-    ckpt_dir,
-    result_dir,
-    sample_rows,
-    sample_cols,
+    *, model, model_cfg, train_cfg, train_loader, train_dataset, device, run_name, ckpt_dir, result_dir
 ) -> None:
     console = Console(highlight=False)
     console.print()
@@ -214,7 +163,7 @@ def _announce_rich(
     console.print(
         Panel(
             JSON(json.dumps(asdict(model_cfg), default=str)),
-            title="model config (MLPConfig)",
+            title="model config (DecisionModelConfig)",
             border_style="blue",
         )
     )
@@ -226,56 +175,34 @@ def _announce_rich(
         )
     )
 
-    # --- data sample ---
-    counts = label_counts(train_dataset)
-    x, y = next(iter(train_loader))
-    caption = f"batch: x {tuple(x.shape)} {x.dtype}   y {tuple(y.shape)} {y.dtype}"
-    title = f"data: train sample  ({len(train_dataset)} examples" + (
-        f", {counts.numel()} classes)" if counts is not None else ")"
+    counts = qtype_counts(train_dataset)
+    batch = next(iter(train_loader))
+    table = Table(
+        title=f"data: train sample  ({len(train_dataset)} question-rows)",
+        border_style="green",
+        caption="  ".join(f"{name}:{n}" for name, n in sorted(counts.items())),
     )
-    table = Table(title=title, border_style="green", caption=caption)
-    rows = min(sample_rows, x.shape[0])
-    cols = min(sample_cols, x.shape[1])
-    table.add_column("#", justify="right", style="dim")
-    for c in range(cols):
-        table.add_column(f"x{c}", justify="right")
-    table.add_column("y", style="bold")
-    for r in range(rows):
-        table.add_row(
-            str(r),
-            *[f"{v:+.3f}" for v in x[r, :cols].tolist()],
-            str(int(y[r])),
-        )
-    if counts is not None:
-        table.caption = (
-            caption
-            + "   "
-            + "  ".join(f"{cls}:{int(n)}" for cls, n in enumerate(counts) if int(n) > 0)
-        )
+    table.add_column("tensor")
+    table.add_column("shape", justify="right")
+    table.add_row("ids", str(tuple(batch["ids"].shape)))
+    table.add_row("marker_pos", str(tuple(batch["marker_pos"].shape)))
+    table.add_row("target", str(tuple(batch["target"].shape)))
     console.print(table)
 
-    # --- model layout ---
     model_table = Table(title=f"model: {type(model).__name__}", border_style="magenta")
-    model_table.add_column("layer")
-    model_table.add_column("shape", justify="right")
+    model_table.add_column("component")
     model_table.add_column("params", justify="right")
-    total = 0
-    for name, param in model.named_parameters():
-        total += param.numel()
-        model_table.add_row(name, str(tuple(param.shape)), f"{param.numel():,d}")
+    total = sum(p.numel() for p in model.parameters())
+    model_table.add_row("encoder", f"{sum(p.numel() for p in model.encoder.parameters()):,d}")
+    model_table.add_row("head", f"{sum(p.numel() for p in model.head.parameters()):,d}")
+    model_table.add_row("scorer", f"{sum(p.numel() for p in model.scorer.parameters()):,d}")
     model_table.add_section()
-    model_table.add_row("TOTAL", "", f"{total:,d}", style="bold")
-    largest = max(model.parameters(), key=lambda p: p.numel())
-    model_table.caption = (
-        f"initial weights of {largest.shape}: "
-        f"mean={largest.mean():+.4f}  std={largest.std():.4f}"
-    )
+    model_table.add_row("TOTAL", f"{total:,d}", style="bold")
     console.print(model_table)
 
-    # --- forward sanity check ---
     console.print(
         Panel(
-            _forward_check(model, x, device),
+            _forward_check(model, batch, device),
             title="forward check (untrained)",
             border_style="yellow",
         )

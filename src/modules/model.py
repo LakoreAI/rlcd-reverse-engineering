@@ -1,90 +1,87 @@
-"""Reference model: an MLP backbone with a linear classification head.
+"""Reference model: a pretrained bidirectional encoder plus a small
+transformer head that reads out one logit per masked option marker.
+Verified directly against Laya's `laya/common.py::DecisionModel` source:
+matches `type_emb`/`head`/`scorer` construction and the marker-gather
+forward pass. Deliberately omits Laya's `act_head` (a separate
+action/escalation head trained with weight 0.0 and reported AUROC 0.30 —
+i.e. by Laya's own account near-useless) so this checkpoint's state_dict is
+not structurally loadable against `convaiinnovations/laya-typed-decisions`'s
+full head, only against its shared encoder.
 
-    x (B, input_dim)
-      -> MLPBackbone            -> feature (B, embed_dim)
-      -> nn.Linear(embed_dim, num_classes) -> logits (B, num_classes)
+    ids, attention_mask (B, L)
+      -> encoder (AutoModel)                -> h (B, L, D)
+      -> h += type_emb(qtype)
+      -> head: `head_layers` x TransformerEncoderLayer (pre-norm)
+      -> gather h at marker_pos             -> (B, K, D)
+      -> scorer MLP                         -> logits (B, K), pad = -1e4
 
-`forward` returns `(logits, feature)` and accepts an optional `label` argument
-that is currently unused. It is kept in the signature so a margin/ArcFace-style
-head can replace the plain linear head later without touching the training
-loop, the evaluator, or the tests.
+`forward` returns just `logits`; option count `K` is per-batch (padded, see
+`src.data.collate_fn`), not fixed like a classification head's num_classes.
 """
 
-from typing import Optional, Tuple
-
 import torch
-import torch.nn as nn
+from torch import nn
+from transformers import AutoModel
 
-from src.config import MLPConfig
-
-
-def _make_activation(name: str) -> nn.Module:
-    if name == "relu":
-        return nn.ReLU(inplace=True)
-    if name == "gelu":
-        return nn.GELU()
-    if name == "tanh":
-        return nn.Tanh()
-    if name == "silu":
-        return nn.SiLU(inplace=True)
-    raise ValueError(f"unknown activation: {name!r}")
+from src.config import DecisionModelConfig
 
 
-class MLPBackbone(nn.Module):
-    """`input_dim -> hidden_dims -> embed_dim` with BN, activation, dropout."""
-
-    def __init__(self, cfg: MLPConfig):
-        super().__init__()
-        layers = []
-        in_dim = cfg.input_dim
-        for hidden_dim in cfg.hidden_dims:
-            layers.append(nn.Linear(in_dim, hidden_dim))
-            if cfg.batch_norm:
-                layers.append(nn.BatchNorm1d(hidden_dim))
-            layers.append(_make_activation(cfg.activation))
-            if cfg.dropout > 0:
-                layers.append(nn.Dropout(cfg.dropout))
-            in_dim = hidden_dim
-
-        # Project the last hidden width to the requested embedding width. When
-        # hidden_dims is empty this is just a Linear(input_dim, embed_dim).
-        if in_dim != cfg.embed_dim or not cfg.hidden_dims:
-            layers.append(nn.Linear(in_dim, cfg.embed_dim))
-            if cfg.batch_norm:
-                layers.append(nn.BatchNorm1d(cfg.embed_dim))
-            layers.append(_make_activation(cfg.activation))
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-class MLPClassifier(nn.Module):
-    def __init__(self, cfg: MLPConfig):
+class DecisionModel(nn.Module):
+    def __init__(self, cfg: DecisionModelConfig, encoder: nn.Module | None = None):
         super().__init__()
         self.cfg = cfg
-        if cfg.num_classes <= 0:
-            raise ValueError(
-                "MLPConfig.num_classes must be set (> 0) before building the model"
-            )
-        self.backbone = MLPBackbone(cfg)
-        self.head = nn.Linear(cfg.embed_dim, cfg.num_classes)
-
-    def get_embedding(self, x: torch.Tensor) -> torch.Tensor:
-        """Feature vector alone — useful for retrieval / calibration paths."""
-        return self.backbone(x)
+        self.encoder = encoder if encoder is not None else AutoModel.from_pretrained(
+            cfg.encoder_name
+        )
+        d = self.encoder.config.hidden_size
+        layer = nn.TransformerEncoderLayer(
+            d_model=d,
+            nhead=max(1, d // 64),
+            dim_feedforward=4 * d,
+            dropout=cfg.head_dropout,
+            batch_first=True,
+            norm_first=True,
+        )
+        # enable_nested_tensor=False matches laya/common.py::DecisionModel —
+        # without it PyTorch warns and silently falls back anyway because
+        # norm_first=True nested-tensor fast path isn't supported.
+        self.head = nn.TransformerEncoder(
+            layer, num_layers=cfg.head_layers, enable_nested_tensor=False
+        )
+        self.type_emb = nn.Embedding(cfg.num_qtypes, d)
+        self.scorer = nn.Sequential(
+            nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1)
+        )
+        # Per-(qtype, K-bucket) temperature, fit post-hoc by
+        # src.pipelines.eval.fit_temperatures and stored here so a
+        # checkpoint carries its calibration alongside its weights.
+        num_buckets = len(cfg.k_buckets) + 1
+        self.register_buffer("temperature", torch.ones(cfg.num_qtypes, num_buckets))
 
     def forward(
         self,
-        x: torch.Tensor,
-        label: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """x: (B, input_dim). `label` is accepted for interface parity with
-        margin-based heads and is currently unused.
-
-        Returns (logits (B, num_classes), feature (B, embed_dim)).
+        ids: torch.Tensor,  # (B, L)
+        attention_mask: torch.Tensor,  # (B, L)
+        marker_pos: torch.Tensor,  # (B, K)
+        marker_mask: torch.Tensor,  # (B, K)
+        qtype: torch.Tensor,  # (B,)
+    ) -> torch.Tensor:
+        """B = batch size, L = padded token length, D = encoder hidden size,
+        K = padded option count. Returns logits (B, K), masked positions
+        set to -1e4.
         """
-        feature = self.backbone(x)
-        logits = self.head(feature)
-        return logits, feature
+        h = self.encoder(input_ids=ids, attention_mask=attention_mask).last_hidden_state
+        # h: (B, L, D)
+        h = h + self.type_emb(qtype)[:, None, :]
+        # type_emb(qtype): (B, D) -> [:, None, :]: (B, 1, D) broadcasts over L -> h: (B, L, D)
+        h = self.head(h, src_key_padding_mask=~attention_mask.bool())
+        # h: (B, L, D) unchanged in shape, self-attention over the L axis
+
+        idx = marker_pos.clamp(min=0)[:, :, None].expand(-1, -1, h.size(-1))
+        # marker_pos: (B, K) -> [:, :, None]: (B, K, 1) -> expand: (B, K, D)
+        gathered = torch.gather(h, 1, idx)
+        # gathered: (B, K, D) — one hidden vector per option marker
+        logits = self.scorer(gathered).squeeze(-1).float()
+        # scorer(gathered): (B, K, 1) -> squeeze(-1): (B, K)
+        return logits.masked_fill(~marker_mask, -1e4)
+        # (B, K)

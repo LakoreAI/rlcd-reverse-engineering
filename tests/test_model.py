@@ -1,66 +1,71 @@
 import pytest
 import torch
 
-from src.config import MLPConfig
-from src.modules.model import MLPBackbone, MLPClassifier
+from src.config import DecisionModelConfig
+from src.modules.model import DecisionModel
 
-B, INPUT_DIM, NUM_CLASSES = 8, 16, 4
-
-
-def make_cfg(**overrides) -> MLPConfig:
-    base = dict(input_dim=INPUT_DIM, num_classes=NUM_CLASSES)
-    base.update(overrides)
-    return MLPConfig(**base)
+B, L, K = 4, 20, 5
 
 
-def test_forward_shapes():
-    cfg = make_cfg()
-    model = MLPClassifier(cfg).eval()
-    x = torch.randn(B, INPUT_DIM)
+def make_batch(vocab_size=100):
+    ids = torch.randint(0, vocab_size, (B, L))
+    attention_mask = torch.ones(B, L, dtype=torch.long)
+    marker_pos = torch.randint(0, L, (B, K))
+    marker_mask = torch.ones(B, K, dtype=torch.bool)
+    marker_mask[:, -1] = False  # last option padded, for one row
+    qtype = torch.zeros(B, dtype=torch.long)
+    return ids, attention_mask, marker_pos, marker_mask, qtype
+
+
+def test_forward_shapes(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    ids, attention_mask, marker_pos, marker_mask, qtype = make_batch()
     with torch.no_grad():
-        logits, feature = model(x)
-    assert logits.shape == (B, NUM_CLASSES)
-    assert feature.shape == (B, cfg.embed_dim)
+        logits = model(ids, attention_mask, marker_pos, marker_mask, qtype)
+    assert logits.shape == (B, K)
     assert torch.isfinite(logits).all()
 
 
-def test_forward_accepts_optional_label():
-    model = MLPClassifier(make_cfg()).eval()
-    x = torch.randn(B, INPUT_DIM)
-    labels = torch.randint(0, NUM_CLASSES, (B,))
+def test_masked_positions_get_pad_logit(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    ids, attention_mask, marker_pos, marker_mask, qtype = make_batch()
     with torch.no_grad():
-        logits, _ = model(x, labels)
-    assert logits.shape == (B, NUM_CLASSES)
+        logits = model(ids, attention_mask, marker_pos, marker_mask, qtype)
+    assert (logits[~marker_mask] == -1e4).all()
+    assert (logits[marker_mask] != -1e4).all()
 
 
-def test_embedding_matches_forward_feature():
-    model = MLPClassifier(make_cfg()).eval()
-    x = torch.randn(B, INPUT_DIM)
+def test_type_embedding_changes_logits(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1, num_qtypes=3)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    ids, attention_mask, marker_pos, marker_mask, _qtype = make_batch()
+    qtype_a = torch.zeros(B, dtype=torch.long)
+    qtype_b = torch.full((B,), 2, dtype=torch.long)
     with torch.no_grad():
-        _, feature = model(x)
-        embedding = model.get_embedding(x)
-    assert torch.allclose(feature, embedding)
+        logits_a = model(ids, attention_mask, marker_pos, marker_mask, qtype_a)
+        logits_b = model(ids, attention_mask, marker_pos, marker_mask, qtype_b)
+    assert not torch.allclose(logits_a, logits_b)
 
 
-def test_empty_hidden_dims_is_linear_projection():
-    cfg = make_cfg(hidden_dims=())
-    backbone = MLPBackbone(cfg).eval()
-    x = torch.randn(B, INPUT_DIM)
-    with torch.no_grad():
-        out = backbone(x)
-    assert out.shape == (B, cfg.embed_dim)
+def test_temperature_buffer_shape(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1, num_qtypes=3, k_buckets=(2, 5, 10))
+    model = DecisionModel(cfg, encoder=dummy_encoder)
+    assert model.temperature.shape == (3, 4)
+    assert torch.allclose(model.temperature, torch.ones(3, 4))
 
 
-def test_missing_num_classes_raises():
+def test_config_rejects_invalid_head_layers():
     with pytest.raises(ValueError):
-        MLPClassifier(make_cfg(num_classes=0))
+        DecisionModelConfig(head_layers=0)
 
 
 def test_config_rejects_invalid_dropout():
     with pytest.raises(ValueError):
-        make_cfg(dropout=1.0)
+        DecisionModelConfig(head_dropout=1.0)
 
 
-def test_config_rejects_unknown_activation():
+def test_config_rejects_head_max_len_over_max_len():
     with pytest.raises(ValueError):
-        make_cfg(activation="swish")
+        DecisionModelConfig(max_len=32, head_max_len=64)

@@ -1,6 +1,7 @@
-"""Training-loop hyperparameters — separate from `src.config.MLPConfig`
+"""Training-loop hyperparameters — separate from `src.config.DecisionModelConfig`
 (model architecture only). Controllable via a YAML file (see
-`configs/train.yaml`) with individual fields overridable from the CLI.
+`configs/train.yaml` / `configs/rlcd_smoke.yaml`) with individual fields
+overridable from the CLI.
 """
 
 from dataclasses import asdict, dataclass
@@ -13,16 +14,17 @@ from src.utils.io_utils import read_yaml
 @dataclass
 class TrainingConfig:
     # --- data ---
-    # `data_root/<train_file>` is required; `val_file` / `test_file` are
-    # optional and skipped when absent.
-    data_root: str = "data/raw"
-    train_file: str = "train.npz"
-    val_file: Optional[str] = "val.npz"
-    test_file: Optional[str] = "test.npz"
-    # If no val_file is present, hold out this fraction of the train set. 0
-    # disables the held-out split (best-checkpointing then uses test metrics).
-    val_fraction: float = 0.0
+    # `LocalLLaMA/typed-decisions` ships train/test HF splits directly; the
+    # calibration slice is carved out of `train` at load time (never from
+    # `test` — fitting temperature on training items inflates it, per
+    # Laya's own issue #186).
+    dataset_name: str = "LocalLLaMA/typed-decisions"
+    dataset_config: str = "all"
+    calib_fraction: float = 0.1
     seed: int = 42
+    # Caps train/test to this many cases (applied before the calib split) —
+    # a quick pipeline sanity check on a small slice, not a real run.
+    max_examples: Optional[int] = None
 
     # --- output ---
     ckpt_dir: str = "checkpoints"
@@ -30,21 +32,33 @@ class TrainingConfig:
     run_name: Optional[str] = None
 
     # --- optimization ---
-    epochs: int = 100
-    batch_size: int = 128
+    epochs: int = 10
+    batch_size: int = 16
     accum_steps: int = 1
     num_workers: int = 0
     pin_memory: bool = False
     amp: bool = False
-    lr: float = 1e-3
-    weight_decay: float = 0.0
+    lr: float = 2e-5
+    weight_decay: float = 0.01
     log_every: int = 10
     eval_every: int = 1
-    ckpt_every: int = 10
+    ckpt_every: int = 1
 
-    # Optional MLPConfig architecture overrides, e.g.
-    # {"hidden_dims": [512, 256], "dropout": 0.2, "embed_dim": 256}.
-    # Keys must be MLPConfig fields (input_dim/num_classes are set at runtime).
+    # --- RLCD loss (Laya's training step: RL term + soft-target CE term) ---
+    # loss = w_rl * L_rl + w_ce * L_ce. CE-only: w_rl=0. RL-only: w_ce=0.
+    w_rl: float = 1.0
+    w_ce: float = 1.0
+    num_noise_samples: int = 4  # number of noisy logit samples per step
+    sigma_start: float = 1.0
+    sigma_end: float = 0.1
+    # True anneals sigma_start -> sigma_end over training (Laya default);
+    # false holds sigma fixed at sigma_start (loss-ablation fixed-sigma runs).
+    anneal_sigma: bool = True
+    reward_w_spherical: float = 0.5
+    reward_w_rps: float = 1.0
+
+    # Optional DecisionModelConfig architecture overrides, e.g.
+    # {"encoder_name": "google/bert_uncased_L-2_H-128_A-2", "head_layers": 1}.
     arch: Optional[dict] = None
 
     # --- callbacks ---
@@ -53,10 +67,10 @@ class TrainingConfig:
     lr_scheduler: Optional[dict] = None
     early_stopping: Optional[dict] = None
     save_best: bool = True
-    # Which validation metric BestCheckpoint/early stopping monitor.
-    # "accuracy"/"f1" are maximized; "val_loss" is minimized.
-    best_metric: str = "accuracy"
-    best_mode: str = "max"
+    # Which validation metric BestCheckpoint/early stopping monitor. Raw
+    # (pre-temperature) ECE is minimized — see src/pipelines/eval.py.
+    best_metric: str = "raw_ece"
+    best_mode: str = "min"
 
     # None (or {"enabled": false}) disables W&B logging.
     wandb: Optional[dict] = None

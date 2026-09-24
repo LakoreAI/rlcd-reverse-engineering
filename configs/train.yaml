@@ -1,14 +1,16 @@
 # Training config — training-loop hyperparameters only. Model architecture
-# (hidden_dims, dropout, embed_dim, ...) lives in src/config.py's MLPConfig and
-# can be overridden per-run with the `arch` block below.
+# (encoder_name, head_layers, ...) lives in src/config.py's
+# DecisionModelConfig and can be overridden per-run with the `arch` block
+# below. This is the "RL+CE (Laya default)" configuration from
+# docs/PLAN.md sec. 5's E2 ablation matrix; ≤5h on a single T4 per the
+# plan's compute budget (Kaggle free 2xT4).
 
 # --- data ---
-data_root: data/raw
-train_file: train.npz
-val_file: val.npz
-test_file: test.npz
-# When val_file is absent, hold out this fraction of the train set.
-val_fraction: 0.0
+dataset_name: LocalLLaMA/typed-decisions
+dataset_config: all
+# Held out from the train split for raw-ECE validation / temperature
+# fitting; never taken from the test split (docs/PLAN.md sec. 5).
+calib_fraction: 0.1
 seed: 42
 
 # --- output ---
@@ -17,43 +19,53 @@ result_dir: results
 run_name: null
 
 # --- optimization ---
-epochs: 100
-batch_size: 128
+epochs: 10
+batch_size: 16
 accum_steps: 1
-num_workers: 0
-pin_memory: false
-amp: false
-lr: 0.001
-weight_decay: 0.0
-log_every: 10
+num_workers: 2
+pin_memory: true
+amp: true
+lr: 0.00002
+weight_decay: 0.01
+log_every: 20
 eval_every: 1
-ckpt_every: 10
+ckpt_every: 1
 
-# Architecture overrides applied to MLPConfig (input_dim/num_classes are set
-# from the data at runtime).
+# --- RLCD loss (docs/PLAN.md sec. 2 / sec. 4) ---
+# loss = w_rl * L_rl + w_ce * L_ce.
+w_rl: 1.0
+w_ce: 1.0
+num_noise_samples: 4
+sigma_start: 1.0
+sigma_end: 0.1
+anneal_sigma: true
+reward_w_spherical: 0.75
+reward_w_rps: 1.0
+
+# Architecture overrides applied to DecisionModelConfig.
 arch: null
-# arch: {hidden_dims: [256, 256], embed_dim: 128, dropout: 0.1}
+# arch: {encoder_name: convaiinnovations/laya, head_layers: 2}
 
 # --- callbacks ---
 lr_scheduler:
   type: cosine
-  t_max: 100
-  eta_min: 0.00001
+  t_max: 10
+  eta_min: 0.0000001
   start_epoch: 0
 early_stopping:
   enabled: true
-  monitor: accuracy
-  mode: max
-  patience: 10
+  monitor: raw_ece
+  mode: min
+  patience: 3
 save_best: true
-best_metric: accuracy
-best_mode: max
+best_metric: raw_ece
+best_mode: min
 
 wandb:
   enabled: false
-  project: ai-research-template
+  project: rlcd-reverse-engineering
   entity: null
   group: null
-  monitor: accuracy
-  mode: max
+  monitor: raw_ece
+  mode: min
   log_artifacts: false

@@ -1,123 +1,220 @@
-"""Dataset plumbing for fixed-size feature vectors.
+"""Dataset plumbing for typed probabilistic decisions.
 
-One example is `(x, label)`: an `(input_dim,)` float32 feature vector and an
-integer class label. Features are stored on disk as `.npz` archives with two
-arrays:
+One raw case is a JSON `state` blob plus several typed *questions* (choice /
+score / noul), each with a gold soft-target distribution over its options.
+`TypedDecisionDataset` flattens this into one row per (case, question) pair
+— matching Laya's own sequence-builder, which re-encodes the state once per
+question rather than once per case (so latency is linear in question count).
 
-    X : (N, input_dim) float32
-    y : (N,)           int64
+    state + {q1: choice, q2: score, q3: noul}
+            -> 3 rows, each `[CLS] <type> question: ... [SEP] [MASK] opt0 ... [SEP] <state> [SEP]`
 
-Replace `FeatureDataset` / `load_npz` when bringing your own input format; the
-rest of the pipeline only needs a `Dataset` yielding `(x, label)` plus the
-`input_dim` / `num_classes` properties.
+Replace `TypedDecisionDataset` / `build_sequence` when bringing a different
+typed-decision source; the rest of the pipeline only needs a `Dataset`
+yielding the dict shape documented on `TypedDecisionDataset.__getitem__`
+plus a matching `collate_fn`.
 """
 
-from pathlib import Path
-from typing import Tuple
+import json
 
-import numpy as np
 import torch
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset
+
+from src.config import QTYPES
+
+# `LocalLLaMA/typed-decisions` sometimes omits `criteria` for `noul`
+# questions (a plain yes/no with no dataset-provided wording) — verified by
+# inspecting the real dataset, not assumed. Falls back to Laya's own
+# default false/true wording (laya/common.py::render_options).
+_DEFAULT_NOUL_CRITERIA = {
+    "false": "no, the statement does not hold",
+    "true": "yes, the statement holds",
+}
 
 
-def load_npz(path: str | Path) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Load an `.npz` with `X` / `y` into `(float32 X, int64 y)` tensors."""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"feature file not found: {path}")
-    with np.load(path) as data:
-        if "X" not in data or "y" not in data:
-            raise ValueError(f"{path} must contain 'X' and 'y' arrays")
-        x = torch.as_tensor(np.asarray(data["X"], dtype=np.float32))
-        y = torch.as_tensor(np.asarray(data["y"], dtype=np.int64))
-    if x.dim() != 2:
-        raise ValueError(f"X must be 2-D (N, input_dim), got shape {tuple(x.shape)}")
-    if y.dim() != 1 or y.shape[0] != x.shape[0]:
-        raise ValueError(
-            f"y must be 1-D with one label per row; got X{tuple(x.shape)} y{tuple(y.shape)}"
-        )
-    return x, y
+def _noul_criteria(question: dict) -> dict:
+    return question.get("criteria") or _DEFAULT_NOUL_CRITERIA
 
 
-def save_npz(path: str | Path, x, y) -> None:
-    """Write feature/label arrays to an `.npz` archive."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(path, X=np.asarray(x, dtype=np.float32), y=np.asarray(y, dtype=np.int64))
+def render_options(question: dict) -> list[str]:
+    """Render a question's options as strings, in the same order used for
+    both the sequence's option markers and the target vector (`target_vector`).
+
+    `choice` criteria are `{option_key: description}` dicts (order preserved
+    from the source JSON). `noul` criteria are the same shape when present,
+    else the fixed false/true wording above. `score` criteria are an
+    ordinal list of level descriptions.
+    """
+    if question["type"] == "choice":
+        return [f"{k}: {v}" for k, v in question["criteria"].items()]
+    if question["type"] == "noul":
+        return [f"{k}: {v}" for k, v in _noul_criteria(question).items()]
+    if question["type"] == "score":
+        return [f"level {i}: {c}" for i, c in enumerate(question["criteria"])]
+    raise ValueError(f"unknown question type: {question['type']!r}")
 
 
-class FeatureDataset(Dataset):
-    def __init__(self, x: torch.Tensor, y: torch.Tensor):
-        if x.shape[0] != y.shape[0]:
-            raise ValueError("x and y must have the same number of rows")
-        self.x = x.float()
-        self.y = y.long()
+def option_keys(question: dict) -> list[str]:
+    """The keys used to index `gold[qid]["probabilities"]`, in the same
+    order as `render_options` — needed to build a target vector aligned to
+    the option markers.
+    """
+    if question["type"] == "choice":
+        return list(question["criteria"].keys())
+    if question["type"] == "noul":
+        return list(_noul_criteria(question).keys())
+    if question["type"] == "score":
+        return [str(i) for i in range(len(question["criteria"]))]
+    raise ValueError(f"unknown question type: {question['type']!r}")
+
+
+def target_vector(question: dict, gold_entry: dict) -> list[float]:
+    probs = gold_entry["probabilities"]
+    return [float(probs[k]) for k in option_keys(question)]
+
+
+def build_sequence(
+    tokenizer, state: str, question: dict, max_len: int = 512, head_max_len: int = 192
+) -> tuple[list[int], list[int]]:
+    """Build one encoder input row for `question` against `state`.
+
+        [CLS] <type> question: <instructions> [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] <state> [SEP]
+
+    Returns `(token_ids, marker_positions)` where `marker_positions[i]` is
+    the index of option `i`'s `[MASK]` token in `token_ids` — the position
+    `src.modules.model.DecisionModel` reads a logit out of.
+    """
+    mask_str = tokenizer.mask_token
+    # If the instructions/options/state text happens to literally contain
+    # the tokenizer's mask string, blank it out first — otherwise it tokenizes
+    # into a real mask token and desyncs `marker_positions` from the actual
+    # option markers (matches laya/common.py::build_sequence's same guard).
+    instructions = str(question["instructions"]).replace(mask_str, " ")
+    head_ids = tokenizer(
+        f'{question["type"]} question: {instructions}', add_special_tokens=False
+    )["input_ids"]
+
+    opts = []
+    for option in render_options(question):
+        opt_ids = tokenizer(
+            " " + option.replace(mask_str, " "),
+            add_special_tokens=False,
+            truncation=True,
+            max_length=48,
+        )["input_ids"]
+        opts.append([tokenizer.mask_token_id] + opt_ids)
+
+    budget = head_max_len - sum(len(o) for o in opts)
+    if budget < 16:
+        # Too many/long options for the shared option budget: truncate each
+        # option to a fixed share (this is the branch a large option set,
+        # e.g. Banking77's 77 classes, triggers hard).
+        per = max(4, (head_max_len - 16) // len(opts))
+        opts = [o[:per] for o in opts]
+        budget = head_max_len - sum(len(o) for o in opts)
+
+    ids = [tokenizer.cls_token_id] + head_ids[: max(8, budget)] + [tokenizer.sep_token_id]
+    markers = []
+    for opt_ids in opts:
+        markers.append(len(ids))
+        ids += opt_ids
+    ids.append(tokenizer.sep_token_id)
+
+    state_ids = tokenizer(str(state).replace(mask_str, " "), add_special_tokens=False)[
+        "input_ids"
+    ]
+    state_ids = state_ids[: max(0, max_len - len(ids) - 1)]
+    ids = (ids + state_ids + [tokenizer.sep_token_id])[:max_len]
+    # Safety net: state truncation above already keeps markers in range in
+    # practice, but drop any that somehow land past the final cutoff rather
+    # than let DecisionModel gather from a truncated-away position.
+    markers = [m for m in markers if m < len(ids)]
+    return ids, markers
+
+
+class TypedDecisionDataset(Dataset):
+    """Flattens an HF `LocalLLaMA/typed-decisions`-shaped split (columns
+    `state`, `questions`, `gold`, each a JSON string) into one row per
+    (case, question).
+
+    `__getitem__` returns `{"ids", "markers", "target", "qtype"}` — variable
+    length per row; use `collate_fn` to batch.
+    """
+
+    def __init__(self, hf_dataset, tokenizer, max_len: int = 512, head_max_len: int = 192):
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+        self.head_max_len = head_max_len
+        self._rows: list[tuple[str, dict, dict]] = []
+        for example in hf_dataset:
+            state = example["state"]
+            questions = json.loads(example["questions"])
+            gold = json.loads(example["gold"])
+            for qid, question in questions.items():
+                self._rows.append((state, question, gold[qid]))
 
     def __len__(self) -> int:
-        return self.x.shape[0]
+        return len(self._rows)
 
-    def __getitem__(self, index: int):
-        return self.x[index], self.y[index]
-
-    @property
-    def input_dim(self) -> int:
-        return int(self.x.shape[1])
-
-    @property
-    def num_classes(self) -> int:
-        return int(self.y.max().item()) + 1 if len(self) else 0
-
-
-def dataset_from_npz(path: str | Path) -> FeatureDataset:
-    x, y = load_npz(path)
-    return FeatureDataset(x, y)
+    def __getitem__(self, index: int) -> dict[str, object]:
+        state, question, gold_entry = self._rows[index]
+        ids, markers = build_sequence(
+            self.tokenizer, state, question, self.max_len, self.head_max_len
+        )
+        return {
+            "ids": ids,
+            "markers": markers,
+            "target": target_vector(question, gold_entry),
+            "qtype": QTYPES[question["type"]],
+        }
 
 
-def make_synthetic_data(
-    n_samples: int = 2000,
-    n_features: int = 32,
-    n_classes: int = 5,
-    n_informative: int = 10,
-    class_sep: float = 1.0,
-    seed: int = 42,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Linearly separable-ish synthetic classification data.
-
-    Used by the smoke test and by anyone who wants to exercise the pipeline
-    before wiring in a real dataset. `sklearn` is imported lazily so the core
-    training path does not require it.
+def collate_fn(batch: list[dict[str, object]], pad_token_id: int) -> dict[str, torch.Tensor]:
+    """Pad a list of `TypedDecisionDataset` rows to the batch's max sequence
+    length / option count. Returns tensors keyed `ids`, `attention_mask`,
+    `marker_pos`, `marker_mask`, `target`, `qtype` — the exact kwargs
+    `src.modules.model.DecisionModel.forward` and `src.modules.loss.rlcd_loss`
+    expect.
     """
-    from sklearn.datasets import make_classification
+    batch_size = len(batch)
+    max_len = max(len(row["ids"]) for row in batch)
+    max_opts = max(len(row["markers"]) for row in batch)
 
-    x, y = make_classification(
-        n_samples=n_samples,
-        n_features=n_features,
-        n_informative=min(n_informative, n_features),
-        n_redundant=0,
-        n_classes=n_classes,
-        n_clusters_per_class=1,
-        class_sep=class_sep,
-        flip_y=0.01,
-        random_state=seed,
-    )
-    return x.astype(np.float32), y.astype(np.int64)
+    ids = torch.full((batch_size, max_len), pad_token_id, dtype=torch.long)
+    attention_mask = torch.zeros((batch_size, max_len), dtype=torch.long)
+    marker_pos = torch.zeros((batch_size, max_opts), dtype=torch.long)
+    marker_mask = torch.zeros((batch_size, max_opts), dtype=torch.bool)
+    target = torch.zeros((batch_size, max_opts), dtype=torch.float32)
+    qtype = torch.zeros((batch_size,), dtype=torch.long)
+
+    for i, row in enumerate(batch):
+        seq_len = len(row["ids"])
+        num_opts = len(row["markers"])
+        ids[i, :seq_len] = torch.as_tensor(row["ids"], dtype=torch.long)
+        attention_mask[i, :seq_len] = 1
+        marker_pos[i, :num_opts] = torch.as_tensor(row["markers"], dtype=torch.long)
+        marker_mask[i, :num_opts] = True
+        target[i, :num_opts] = torch.as_tensor(row["target"], dtype=torch.float32)
+        qtype[i] = row["qtype"]
+
+    return {
+        "ids": ids,
+        "attention_mask": attention_mask,
+        "marker_pos": marker_pos,
+        "marker_mask": marker_mask,
+        "target": target,
+        "qtype": qtype,
+    }
 
 
-def split_train_val(
-    dataset: FeatureDataset, val_fraction: float, seed: int
-) -> Tuple[Dataset, Dataset | None]:
-    """Deterministic random split into `(train, val)` subsets.
-
-    Returns `(dataset, None)` when `val_fraction <= 0` or the dataset is too
-    small to split. Splits are index-based `Subset`s, so features stay shared.
+def split_train_calib(hf_train_dataset, calib_fraction: float, seed: int):
+    """Deterministic case-level split of the HF train split into (train,
+    calibration) — the calibration slice is what `src.pipelines.eval`
+    fits the per-(type, K-bucket) temperature on, never the test split
+    (Laya's own issue #186 warns fitting temperature on training items
+    inflates it). Returns `(train, None)` when `calib_fraction <= 0`.
     """
-    n = len(dataset)
-    if val_fraction <= 0 or n < 2:
-        return dataset, None
-    n_val = max(int(round(n * val_fraction)), 1)
-    n_val = min(n_val, n - 1)
-    g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(n, generator=g).tolist()
-    val_idx = perm[:n_val]
-    train_idx = perm[n_val:]
-    return Subset(dataset, train_idx), Subset(dataset, val_idx)
+    if calib_fraction <= 0:
+        return hf_train_dataset, None
+    split = hf_train_dataset.train_test_split(test_size=calib_fraction, seed=seed)
+    return split["train"], split["test"]

@@ -1,43 +1,60 @@
+import json
+from functools import partial
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from datasets import Dataset as HFDataset
+from torch.utils.data import DataLoader
 
-from src.config import MLPConfig
-from src.data import FeatureDataset, make_synthetic_data
-from src.modules.model import MLPClassifier
-from src.pipelines._utils import announce_training, label_counts
+from src.config import DecisionModelConfig
+from src.data import TypedDecisionDataset, collate_fn
+from src.modules.model import DecisionModel
+from src.pipelines._utils import announce_training, qtype_counts
 from src.pipelines.config import TrainingConfig
 
-
-def make_dataset(n=24, d=6, c=3) -> FeatureDataset:
-    x, y = make_synthetic_data(n_samples=n, n_features=d, n_classes=c, seed=0)
-    return FeatureDataset(torch.as_tensor(x), torch.as_tensor(y))
-
-
-def test_label_counts_full_and_subset():
-    ds = make_dataset()
-    assert int(label_counts(ds).sum()) == len(ds)
-    sub = Subset(ds, list(range(10)))
-    assert int(label_counts(sub).sum()) == 10
-
-
-def test_label_counts_unlabeled_returns_none():
-    class Plain(Dataset):
-        def __len__(self):
-            return 2
-
-        def __getitem__(self, i):
-            return torch.zeros(3), 0
-
-    assert label_counts(Plain()) is None
+CHOICE_Q = {
+    "type": "choice",
+    "instructions": "What should happen?",
+    "criteria": {"stop": "Halt now.", "go": "Proceed."},
+}
+SCORE_Q = {
+    "type": "score",
+    "instructions": "How risky is this?",
+    "criteria": ["Benign.", "Low."],
+}
 
 
-def test_announce_training_prints_config_data_and_model(capsys):
-    ds = make_dataset()
-    loader = DataLoader(ds, batch_size=8)
-    cfg = MLPConfig(input_dim=6, num_classes=3)
-    model = MLPClassifier(cfg)
+def make_dataset(dummy_tokenizer) -> TypedDecisionDataset:
+    cases = [
+        {
+            "id": "c0",
+            "state": json.dumps({"task": "do the thing"}),
+            "questions": json.dumps({"q1": CHOICE_Q, "q2": SCORE_Q}),
+            "gold": json.dumps(
+                {
+                    "q1": {"probabilities": {"stop": 0.4, "go": 0.6}},
+                    "q2": {"probabilities": {"0": 0.5, "1": 0.5}},
+                }
+            ),
+        }
+    ]
+    hf_ds = HFDataset.from_list(cases)
+    return TypedDecisionDataset(hf_ds, dummy_tokenizer, max_len=64, head_max_len=32)
+
+
+def test_qtype_counts(dummy_tokenizer):
+    ds = make_dataset(dummy_tokenizer)
+    counts = qtype_counts(ds)
+    assert counts == {"choice": 1, "score": 1}
+
+
+def test_announce_training_prints_config_data_and_model(capsys, dummy_tokenizer, dummy_encoder):
+    ds = make_dataset(dummy_tokenizer)
+    loader = DataLoader(
+        ds, batch_size=2, collate_fn=partial(collate_fn, pad_token_id=dummy_tokenizer.pad_token_id)
+    )
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder)
 
     announce_training(
         model=model,
@@ -52,7 +69,7 @@ def test_announce_training_prints_config_data_and_model(capsys):
     )
     out = capsys.readouterr().out
     assert "RUN  run-x" in out
-    assert "model config (MLPConfig)" in out
+    assert "model config (DecisionModelConfig)" in out
     assert "training config (TrainingConfig)" in out
     assert "data: train sample" in out
     assert "TOTAL" in out

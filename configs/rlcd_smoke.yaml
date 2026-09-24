@@ -1,0 +1,45 @@
+# A tiny/fast variant of train.yaml for local smoke runs: a real (but tiny)
+# pretrained encoder instead of ModernBERT-large, one epoch, a small slice
+# of the real dataset's shape exercised end to end. Not meant to produce
+# meaningful calibration numbers — see docs/PLAN.md sec. 5 for the real E2
+# configs, which need a T4-class GPU and ModernBERT-large.
+
+dataset_name: LocalLLaMA/typed-decisions
+dataset_config: all
+calib_fraction: 0.2
+seed: 42
+
+ckpt_dir: checkpoints
+result_dir: results
+run_name: rlcd_smoke
+
+epochs: 1
+batch_size: 4
+num_workers: 0
+lr: 0.0001
+weight_decay: 0.0
+log_every: 5
+eval_every: 1
+ckpt_every: 1
+
+w_rl: 1.0
+w_ce: 1.0
+num_noise_samples: 4
+sigma_start: 1.0
+sigma_end: 1.0
+anneal_sigma: false
+
+# A real but tiny (~4.4M param) BERT checkpoint — has a proper fast
+# tokenizer with [MASK]/[CLS]/[SEP], unlike some "tiny-random" test fixtures.
+arch: {encoder_name: google/bert_uncased_L-2_H-128_A-2, head_layers: 1, max_len: 128, head_max_len: 64}
+
+lr_scheduler:
+  type: none
+early_stopping:
+  enabled: false
+save_best: true
+best_metric: raw_ece
+best_mode: min
+
+wandb:
+  enabled: false

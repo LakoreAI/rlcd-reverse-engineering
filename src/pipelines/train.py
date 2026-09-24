@@ -1,22 +1,28 @@
-"""MLP training entrypoint.
+"""Typed-decision (RLCD/Laya-style) training entrypoint.
 
-Feature classification with a plain cross-entropy loss. Validation is the
-held-out split's accuracy / macro-F1 (optionally its loss). Controlled via a
-YAML config (see configs/train.yaml) with individual CLI overrides. Callbacks
-(LR schedule, early stopping, best checkpoint, W&B) are wired from that file.
+Fine-tunes a pretrained bidirectional encoder plus a small transformer head
+on `LocalLLaMA/typed-decisions` (or an equivalent dataset) with Laya's
+combined RL+CE loss. Validation is the raw (pre-temperature) calibration
+split's ECE/Brier/NLL/accuracy. Controlled via
+a YAML config (see `configs/train.yaml`, `configs/rlcd_smoke.yaml`) with
+individual CLI overrides. Callbacks (LR schedule, early stopping, best
+checkpoint, W&B) are wired from that file and are unmodified from the
+inherited scaffold — see `src/callbacks/`.
 
 Usage:
     uv run python -m src.pipelines.train --config configs/train.yaml
-    uv run python -m src.pipelines.train --config configs/train.yaml --epochs 50 --lr 5e-4
+    uv run python -m src.pipelines.train --config configs/rlcd_smoke.yaml --epochs 1
 """
 
 import argparse
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
-from typing import Optional
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from datasets import load_dataset
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
 from src.callbacks import (
     BestCheckpoint,
@@ -26,29 +32,21 @@ from src.callbacks import (
     build_lr_scheduler,
 )
 from src.callbacks.wandb_callback import WandbCallback
-from src.config import MLPConfig
-from src.data import dataset_from_npz, split_train_val
-from src.modules.loss import ClassificationLoss
-from src.modules.model import MLPClassifier
+from src.config import DecisionModelConfig
+from src.data import TypedDecisionDataset, collate_fn, split_train_calib
+from src.modules.loss import rlcd_loss
+from src.modules.model import DecisionModel
 from src.pipelines._utils import announce_training
 from src.pipelines.config import TrainingConfig, load_training_config
-from src.pipelines.eval import eval_per_epoch, format_report
+from src.pipelines.eval import eval_per_epoch, evaluate, format_report
 from src.utils.io_utils import load_env, save_checkpoint, save_json
 from src.utils.model_utils import detect_device, get_run_name
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _resolve(data_root: str, name: Optional[str]) -> Optional[Path]:
-    """`<data_root>/<name>` if it exists, else None (optional splits)."""
-    if not name:
-        return None
-    path = Path(data_root) / name
-    return path if path.exists() else None
-
-
-def build_model(model_cfg: MLPConfig, device: torch.device) -> MLPClassifier:
-    return MLPClassifier(model_cfg).to(device)
+def build_model(model_cfg: DecisionModelConfig, device: torch.device) -> DecisionModel:
+    return DecisionModel(model_cfg).to(device)
 
 
 def build_callbacks(
@@ -95,32 +93,38 @@ def build_callbacks(
 
 def build_loaders(
     train_cfg: TrainingConfig,
+    model_cfg: DecisionModelConfig,
+    tokenizer,
     device: torch.device,
-) -> tuple[DataLoader, Optional[DataLoader], Optional[DataLoader], Dataset]:
-    """Returns (train_loader, val_loader, test_loader, train_dataset).
+) -> tuple[DataLoader, DataLoader | None, DataLoader, TypedDecisionDataset]:
+    """Returns (train_loader, calib_loader, test_loader, train_dataset).
 
-    Preference order for validation: an explicit `val_file`; otherwise a
-    deterministic split of the train set when `val_fraction > 0`.
+    `calib_loader` is a case-level held-out slice of the train split (never
+    the test split) used for raw-ECE validation during training and for
+    post-hoc temperature fitting.
     """
-    train_path = _resolve(train_cfg.data_root, train_cfg.train_file)
-    if train_path is None:
-        raise FileNotFoundError(
-            f"training split not found: {Path(train_cfg.data_root) / train_cfg.train_file}"
-        )
-    train_dataset = dataset_from_npz(train_path)
+    raw = load_dataset(train_cfg.dataset_name, train_cfg.dataset_config)
+    train_hf, test_hf = raw["train"], raw["test"]
+    if train_cfg.max_examples is not None:
+        train_hf = train_hf.select(range(min(len(train_hf), train_cfg.max_examples)))
+        test_hf = test_hf.select(range(min(len(test_hf), train_cfg.max_examples)))
+    train_hf, calib_hf = split_train_calib(train_hf, train_cfg.calib_fraction, train_cfg.seed)
 
-    val_path = _resolve(train_cfg.data_root, train_cfg.val_file)
-    if val_path is not None:
-        val_dataset: Optional[Dataset] = dataset_from_npz(val_path)
-    else:
-        train_dataset, val_dataset = split_train_val(
-            train_dataset, train_cfg.val_fraction, train_cfg.seed
-        )
+    train_dataset = TypedDecisionDataset(
+        train_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len
+    )
+    calib_dataset = (
+        TypedDecisionDataset(calib_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len)
+        if calib_hf is not None
+        else None
+    )
+    test_dataset = TypedDecisionDataset(
+        test_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len
+    )
 
-    test_path = _resolve(train_cfg.data_root, train_cfg.test_file)
-    test_dataset = dataset_from_npz(test_path) if test_path is not None else None
-
+    collate = partial(collate_fn, pad_token_id=tokenizer.pad_token_id)
     pin_memory = train_cfg.pin_memory and device.type == "cuda"
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_cfg.batch_size,
@@ -128,37 +132,40 @@ def build_loaders(
         drop_last=False,
         num_workers=train_cfg.num_workers,
         pin_memory=pin_memory,
+        collate_fn=collate,
     )
-    val_loader = (
+    calib_loader = (
         DataLoader(
-            val_dataset,
+            calib_dataset,
             batch_size=train_cfg.batch_size,
             shuffle=False,
             num_workers=train_cfg.num_workers,
             pin_memory=pin_memory,
+            collate_fn=collate,
         )
-        if val_dataset is not None and len(val_dataset) > 0
+        if calib_dataset is not None and len(calib_dataset) > 0
         else None
     )
-    test_loader = (
-        DataLoader(
-            test_dataset,
-            batch_size=train_cfg.batch_size,
-            shuffle=False,
-            num_workers=train_cfg.num_workers,
-            pin_memory=pin_memory,
-        )
-        if test_dataset is not None
-        else None
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=train_cfg.batch_size,
+        shuffle=False,
+        num_workers=train_cfg.num_workers,
+        pin_memory=pin_memory,
+        collate_fn=collate,
     )
-    return train_loader, val_loader, test_loader, train_dataset
+    return train_loader, calib_loader, test_loader, train_dataset
 
 
-def _optimizer_step(
-    optimizer, scaler, callbacks, ctx, pending_losses, step, epoch, log_every
-):
-    scaler.step(optimizer)
-    scaler.update()
+def _sigma_at_epoch(train_cfg: TrainingConfig, epoch: int) -> float:
+    if not train_cfg.anneal_sigma or train_cfg.epochs <= 1:
+        return train_cfg.sigma_start
+    progress = (epoch - 1) / (train_cfg.epochs - 1)
+    return train_cfg.sigma_start + progress * (train_cfg.sigma_end - train_cfg.sigma_start)
+
+
+def _optimizer_step(optimizer, callbacks, ctx, pending_losses, step, epoch, log_every):
+    optimizer.step()
     optimizer.zero_grad()
     step += 1
     avg_loss = sum(pending_losses) / len(pending_losses)
@@ -172,10 +179,8 @@ def _optimizer_step(
 
 def train_per_epoch(
     model,
-    criterion,
     loader,
     optimizer,
-    scaler,
     accum_steps,
     device,
     callbacks,
@@ -183,32 +188,48 @@ def train_per_epoch(
     step,
     epoch,
     log_every,
+    sigma,
+    train_cfg: TrainingConfig,
 ):
     model.train()
     epoch_losses, pending = [], []
     optimizer.zero_grad()
 
-    for x, labels in loader:
-        x = x.float().to(device)
-        labels = labels.reshape(-1).long().to(device)
+    for batch in loader:
+        ids = batch["ids"].to(device)
+        attention_mask = batch["attention_mask"].to(device)
+        marker_pos = batch["marker_pos"].to(device)
+        marker_mask = batch["marker_mask"].to(device)
+        target = batch["target"].to(device)
+        qtype = batch["qtype"].to(device)
 
-        with torch.autocast(device_type=device.type, enabled=scaler.is_enabled()):
-            logits, _ = model(x)
-            loss = criterion(logits, labels)
+        logits = model(ids, attention_mask, marker_pos, marker_mask, qtype)
+        loss, _parts = rlcd_loss(
+            logits,
+            target,
+            qtype,
+            marker_mask,
+            sigma,
+            num_noise_samples=train_cfg.num_noise_samples,
+            w_ce=train_cfg.w_ce,
+            w_rl=train_cfg.w_rl,
+            w_sph=train_cfg.reward_w_spherical,
+            w_rps=train_cfg.reward_w_rps,
+        )
 
-        scaler.scale(loss / accum_steps).backward()
+        (loss / accum_steps).backward()
         pending.append(loss.item())
 
         if len(pending) == accum_steps:
             step, avg_loss = _optimizer_step(
-                optimizer, scaler, callbacks, ctx, pending, step, epoch, log_every
+                optimizer, callbacks, ctx, pending, step, epoch, log_every
             )
             epoch_losses.append(avg_loss)
             pending = []
 
     if pending:
         step, avg_loss = _optimizer_step(
-            optimizer, scaler, callbacks, ctx, pending, step, epoch, log_every
+            optimizer, callbacks, ctx, pending, step, epoch, log_every
         )
         epoch_losses.append(avg_loss)
 
@@ -229,32 +250,23 @@ def train(train_cfg: TrainingConfig):
     elif device.type == "mps":
         torch.mps.manual_seed(train_cfg.seed)
 
-    train_loader, val_loader, test_loader, train_dataset = build_loaders(
-        train_cfg, device
-    )
-    num_classes = train_dataset.num_classes
-    input_dim = train_dataset.input_dim
-    print(f"classes: {num_classes}  input_dim: {input_dim}")
+    model_cfg = DecisionModelConfig(**(train_cfg.arch or {}))
+    tokenizer = AutoTokenizer.from_pretrained(model_cfg.encoder_name)
 
-    model_cfg = MLPConfig(
-        input_dim=input_dim,
-        num_classes=num_classes,
-        **(train_cfg.arch or {}),
+    train_loader, calib_loader, test_loader, train_dataset = build_loaders(
+        train_cfg, model_cfg, tokenizer, device
     )
+    print(f"train rows: {len(train_dataset)}")
+
     model = build_model(model_cfg, device)
-    criterion = ClassificationLoss().to(device)
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay
-    )
-    scaler = torch.amp.GradScaler(
-        "cuda" if device.type == "cuda" else "cpu",
-        enabled=(train_cfg.amp and device.type == "cuda"),
     )
 
     run_name = train_cfg.run_name or get_run_name(
-        "mlp",
-        Path(train_cfg.data_root).name,
+        "rlcd",
+        train_cfg.dataset_name.split("/")[-1],
         train_cfg.lr,
         train_cfg.batch_size,
     )
@@ -307,12 +319,11 @@ def train(train_cfg: TrainingConfig):
     history = []
     stopped_early = False
     for epoch in range(start_epoch, train_cfg.epochs + 1):
+        sigma = _sigma_at_epoch(train_cfg, epoch)
         train_loss, step = train_per_epoch(
             model,
-            criterion,
             train_loader,
             optimizer,
-            scaler,
             train_cfg.accum_steps,
             device,
             callbacks,
@@ -320,53 +331,30 @@ def train(train_cfg: TrainingConfig):
             step,
             epoch,
             train_cfg.log_every,
+            sigma,
+            train_cfg,
         )
-        record = {"epoch": epoch, "step": step, "loss": train_loss}
-        print(f"epoch {epoch:3d}/{train_cfg.epochs}  train_loss={train_loss:.4f}")
+        record = {"epoch": epoch, "step": step, "loss": train_loss, "sigma": sigma}
+        print(
+            f"epoch {epoch:3d}/{train_cfg.epochs}  train_loss={train_loss:.4f}  sigma={sigma:.3f}"
+        )
 
         should_validate = epoch % train_cfg.eval_every == 0 or epoch == train_cfg.epochs
         if should_validate:
-            val_result = (
-                eval_per_epoch(
-                    model,
-                    val_loader,
-                    device,
-                    num_classes=num_classes,
-                    criterion=criterion,
+            extra = eval_per_epoch(model, calib_loader, device)
+            record.update(extra)
+            if extra:
+                print(
+                    f"  calib raw: ECE={extra['raw_ece'] * 100:6.2f}  "
+                    f"Brier={extra['raw_brier']:.4f}  acc={extra['raw_accuracy'] * 100:6.2f}"
                 )
-                if val_loader is not None
-                else None
-            )
-            # Report the test split when present, else fall back to the val
-            # split so a run without a held-out test still has metrics.
-            metric_result = (
-                eval_per_epoch(
-                    model,
-                    test_loader,
-                    device,
-                    num_classes=num_classes,
-                    criterion=criterion,
-                )
-                if test_loader is not None
-                else val_result
-            )
-            extra = {}
-            if metric_result is not None:
-                extra = {
-                    "accuracy": metric_result["accuracy"],
-                    "f1": metric_result["f1"],
-                    "metric_loss": metric_result["loss"],
-                }
-                record.update(extra)
-                print(format_report(metric_result))
             state = TrainerState(
                 step=step,
                 train_loss=train_loss,
                 epoch=epoch,
-                val_loss=val_result["loss"] if val_result is not None else None,
+                val_loss=None,
                 extra=extra,
             )
-            record["val_loss"] = state.val_loss
             for cb in callbacks:
                 cb.on_validation_end(ctx, state)
             if any(es.should_stop for es in early_stoppers):
@@ -395,13 +383,25 @@ def train(train_cfg: TrainingConfig):
     for cb in callbacks:
         cb.on_train_end(ctx)
 
+    final_result = None
+    if calib_loader is not None:
+        final_result = evaluate(
+            model,
+            calib_loader,
+            test_loader,
+            device,
+            save_json_path=result_dir / "test_eval.json",
+        )
+        print("\nfinal test evaluation:")
+        print(format_report(final_result))
+
     save_json(history, ckpt_dir / "train_log.json")
     save_json(history, result_dir / "train_log.json")
     print(
         f"\n{'stopped early' if stopped_early else 'finished'} "
         f"at epoch {epoch} (step {step})"
     )
-    return history
+    return history, final_result
 
 
 if __name__ == "__main__":
@@ -409,10 +409,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config", type=Path, default=None, help="YAML, see configs/train.yaml"
     )
-    parser.add_argument("--data_root", type=str, default=None)
-    parser.add_argument("--train_file", type=str, default=None)
-    parser.add_argument("--val_file", type=str, default=None)
-    parser.add_argument("--test_file", type=str, default=None)
+    parser.add_argument("--dataset_name", type=str, default=None)
+    parser.add_argument("--dataset_config", type=str, default=None)
+    parser.add_argument("--calib_fraction", type=float, default=None)
+    parser.add_argument(
+        "--max_examples", type=int, default=None, help="cap train/test to this many cases"
+    )
     parser.add_argument("--ckpt_dir", type=str, default=None)
     parser.add_argument("--result_dir", type=str, default=None)
     parser.add_argument("--run_name", type=str, default=None)
@@ -425,11 +427,12 @@ if __name__ == "__main__":
     parser.add_argument("--log_every", type=int, default=None)
     parser.add_argument("--eval_every", type=int, default=None)
     parser.add_argument("--ckpt_every", type=int, default=None)
-    parser.add_argument("--val_fraction", type=float, default=None)
+    parser.add_argument("--w_rl", type=float, default=None)
+    parser.add_argument("--w_ce", type=float, default=None)
+    parser.add_argument("--sigma_start", type=float, default=None)
+    parser.add_argument("--sigma_end", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--resume_from", type=str, default=None)
-    parser.add_argument("--amp", action="store_true", default=None)
-    parser.add_argument("--pin_memory", action="store_true", default=None)
     args = parser.parse_args()
 
     overrides = {k: v for k, v in vars(args).items() if k != "config"}

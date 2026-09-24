@@ -1,88 +1,87 @@
-"""Single-checkpoint inference: feature vectors -> logits / probabilities.
+"""Single-checkpoint inference: a state blob + one typed question ->
+option probabilities.
 
-Loads a checkpoint, rebuilds the model from its saved architecture config, and
-runs a forward pass over one or all rows of an `.npz` feature file. If the file
-carries labels, accuracy over the selected rows is reported too.
+Loads a checkpoint, rebuilds the model from its saved architecture config,
+and scores one question against a state string.
 
 Usage:
     uv run python -m src.pipelines.infer \\
-        --ckpt checkpoints/<run>/best.pt --features data/raw/test.npz --index 0
+        --ckpt checkpoints/<run>/best.pt \\
+        --state '{"task": "...", "trace_summary": {...}}' \\
+        --question '{"type": "choice", "instructions": "What should happen?", \\
+                      "criteria": {"continue": "...", "stop": "..."}}'
 """
 
 import argparse
+import json
 from dataclasses import fields
 from pathlib import Path
-from typing import Dict, Optional
 
 import torch
+from transformers import AutoTokenizer
 
-from src.config import MLPConfig
-from src.data import load_npz
+from src.config import QTYPES, DecisionModelConfig
+from src.data import build_sequence, option_keys
 from src.modules.loss import predict, probabilities
-from src.modules.model import MLPClassifier
+from src.modules.model import DecisionModel
 from src.utils.model_utils import detect_device
 
 
-def config_from_checkpoint(ckpt: dict) -> MLPConfig:
-    """Rebuild MLPConfig from a checkpoint's saved `extra["cfg"]`."""
+def config_from_checkpoint(ckpt: dict) -> DecisionModelConfig:
+    """Rebuild DecisionModelConfig from a checkpoint's saved `extra["cfg"]`."""
     saved = ckpt.get("extra", {}).get("cfg", {})
-    known = {f.name for f in fields(MLPConfig)}
-    return MLPConfig(**{k: v for k, v in saved.items() if k in known})
+    known = {f.name for f in fields(DecisionModelConfig)}
+    return DecisionModelConfig(**{k: v for k, v in saved.items() if k in known})
 
 
-def load_model(
-    ckpt_path: Path, device: torch.device
-) -> tuple[MLPClassifier, MLPConfig]:
+def load_model(ckpt_path: Path, device: torch.device):
     ckpt_path = Path(ckpt_path)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
     raw = torch.load(ckpt_path, map_location=str(device))
     cfg = config_from_checkpoint(raw)
-    model = MLPClassifier(cfg).to(device)
+    model = DecisionModel(cfg).to(device)
     model.load_state_dict(raw["model"])
     model.eval()
-    return model, cfg
+    tokenizer = AutoTokenizer.from_pretrained(cfg.encoder_name)
+    return model, cfg, tokenizer
 
 
 @torch.no_grad()
 def infer(
     ckpt_path: Path,
-    features_path: Path,
-    index: Optional[int] = 0,
-    out_path: Optional[Path] = None,
-) -> Dict[str, object]:
-    """Score one row (`index`) or every row (`index=None`) of the feature file."""
+    state: str,
+    question: dict,
+    out_path: Path | None = None,
+) -> dict:
+    """Score `question` against `state` with the model at `ckpt_path`."""
     device = detect_device()
-    model, cfg = load_model(ckpt_path, device)
-    x, y = load_npz(features_path)
+    model, cfg, tokenizer = load_model(ckpt_path, device)
 
-    if index is None:
-        x_sel, y_sel = x, y
-    else:
-        x_sel, y_sel = x[index : index + 1], y[index : index + 1]
+    ids, markers = build_sequence(tokenizer, state, question, cfg.max_len, cfg.head_max_len)
+    ids_t = torch.tensor([ids], dtype=torch.long, device=device)
+    attention_mask = torch.ones_like(ids_t)
+    marker_pos = torch.tensor([markers], dtype=torch.long, device=device)
+    marker_mask = torch.ones_like(marker_pos, dtype=torch.bool)
+    qtype = torch.tensor([QTYPES[question["type"]]], dtype=torch.long, device=device)
 
-    if x_sel.shape[1] != cfg.input_dim:
-        raise ValueError(
-            f"feature dim mismatch: file has {x_sel.shape[1]}, model expects {cfg.input_dim}"
-        )
-    x_sel = x_sel.to(device)
-    logits, feature = model(x_sel)
+    logits = model(ids_t, attention_mask, marker_pos, marker_mask, qtype)
     probs = probabilities(logits)
-    preds = predict(logits)
+    pred_idx = int(predict(logits)[0])
+    keys = option_keys(question)
 
     print(f"checkpoint: {ckpt_path}")
-    print(f"samples: {x_sel.shape[0]}  feature: {tuple(feature.shape)}")
-    print(f"predicted: {preds.tolist()}")
-    if len(y_sel):
-        matches = (preds.cpu() == y_sel).float().mean().item()
-        print(f"labels:    {y_sel.tolist()}  (accuracy={matches * 100:.2f}%)")
+    print(f"question type: {question['type']}   options: {keys}")
+    print(
+        f"predicted: {keys[pred_idx]}   "
+        f"probabilities: {dict(zip(keys, (round(p, 4) for p in probs[0].tolist())))}"
+    )
 
     result = {
         "logits": logits.cpu(),
         "probabilities": probs.cpu(),
-        "predictions": preds.cpu(),
-        "feature": feature.cpu(),
-        "source": str(features_path),
+        "predicted_key": keys[pred_idx],
+        "option_keys": keys,
     }
     if out_path is not None:
         torch.save(result, out_path)
@@ -93,11 +92,8 @@ def infer(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=Path, required=True)
-    parser.add_argument("--features", type=Path, required=True)
-    parser.add_argument(
-        "--index", type=int, default=0, help="row to score; omit with --all"
-    )
-    parser.add_argument("--all", action="store_true", help="score every row")
+    parser.add_argument("--state", type=str, required=True, help="JSON state blob")
+    parser.add_argument("--question", type=str, required=True, help="JSON question dict")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
-    infer(args.ckpt, args.features, None if args.all else args.index, args.out)
+    infer(args.ckpt, args.state, json.loads(args.question), args.out)
