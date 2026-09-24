@@ -1,0 +1,59 @@
+# Training config — training-loop hyperparameters only. Model architecture
+# (hidden_dims, dropout, embed_dim, ...) lives in src/config.py's MLPConfig and
+# can be overridden per-run with the `arch` block below.
+
+# --- data ---
+data_root: data/raw
+train_file: train.npz
+val_file: val.npz
+test_file: test.npz
+# When val_file is absent, hold out this fraction of the train set.
+val_fraction: 0.0
+seed: 42
+
+# --- output ---
+ckpt_dir: checkpoints
+result_dir: results
+run_name: null
+
+# --- optimization ---
+epochs: 100
+batch_size: 128
+accum_steps: 1
+num_workers: 0
+pin_memory: false
+amp: false
+lr: 0.001
+weight_decay: 0.0
+log_every: 10
+eval_every: 1
+ckpt_every: 10
+
+# Architecture overrides applied to MLPConfig (input_dim/num_classes are set
+# from the data at runtime).
+arch: null
+# arch: {hidden_dims: [256, 256], embed_dim: 128, dropout: 0.1}
+
+# --- callbacks ---
+lr_scheduler:
+  type: cosine
+  t_max: 100
+  eta_min: 0.00001
+  start_epoch: 0
+early_stopping:
+  enabled: true
+  monitor: accuracy
+  mode: max
+  patience: 10
+save_best: true
+best_metric: accuracy
+best_mode: max
+
+wandb:
+  enabled: false
+  project: ai-research-template
+  entity: null
+  group: null
+  monitor: accuracy
+  mode: max
+  log_artifacts: false
