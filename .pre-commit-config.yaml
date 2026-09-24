@@ -38,7 +38,7 @@ repos:
   - repo: local
     hooks:
       - id: pytest
-        name: pytest (ai-research-project-template test suite)
+        name: pytest (rlcd-reverse-engineering test suite)
         entry: uv run pytest tests/ -q
         language: system
         pass_filenames: false
