@@ -88,3 +88,53 @@ uv run python scripts/e2/summarize.py --runs_dir results/e2_vm/results --json re
 
 That is exactly what `docs/paper/README.md` assumes, so the paper's tables and
 figures regenerate without ever renting a GPU.
+
+## Plan for the next rented run (Runpod)
+
+To finish §9.4 of `docs/TODO.md` — 2 extra seeds each for σ=0.5, σ=2 and
+RL-only (6 runs), the 3 E4 reward-composition runs, and E5 (inference-only)
+— on Runpod instead of ckey.vn.
+
+**GPU (Community Cloud is the economy tier).** Prices scraped from
+runpod.io/pricing on 2026-09-13; re-check before renting.
+
+| GPU | VRAM | bf16 | $/hr | note |
+|---|---|---|---|---|
+| RTX A5000 | 24 GB | yes | **0.16** | cheapest viable; only 25 GB host RAM |
+| RTX 3090 | 24 GB | yes | **0.22** | best all-round (125 GB RAM, 16 vCPU) |
+| RTX A6000 | 48 GB | yes | 0.33 | zero-fuss headroom |
+| A40 | 48 GB | yes | 0.35 | zero-fuss headroom |
+| RTX 4090 | 24 GB | yes | 0.34 | fastest 24 GB |
+| A100 80 GB | 80 GB | yes | 1.19 | overkill, skip |
+
+Pick **RTX 3090 (Community)**; fall back to A5000 for the cheapest, or
+A6000/A40 48 GB if OOM. Avoid V100 (no bf16) and <24 GB cards.
+
+**Storage.** `40 GB` container disk is ample: ~7 GB `.venv` (torch cu126 +
+`nvidia/*`), ~3.4 GB HF weights (ModernBERT-large + Laya), ~5 GB OS/tools,
+and ~5 GB per `epoch_*.pt` if `DELETE_CKPTS=1` keeps only the current run.
+Container disk is $0.10/GB/mo (~$0.005/hr) and **ephemeral** — upload to the
+HF repo before terminating. Without `DELETE_CKPTS=1`, 9 runs' checkpoints
+need ~45 GB, so budget 60–70 GB instead. Attach a network volume only if
+runs will span sessions.
+
+**Deploy.**
+
+- Template: `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+  (ships `gcc`, needed for ModernBERT's Triton path).
+- Env: `HF_TOKEN`, `WANDB_API_KEY`.
+- 24 GB cards: `BATCH=8 ACCUM=8` (same effective batch); add `GRAD_CKPT=1`
+  only if it still OOMs.
+
+```bash
+CONFIGS="rlce_sigma0p5_fixed:43 rlce_sigma0p5_fixed:44 rlce_sigma2_fixed:43 rlce_sigma2_fixed:44 rl_only:43 rl_only:44" \
+HF_REPO=<user>/rlcd-e2-checkpoints DELETE_CKPTS=1 BATCH=8 ACCUM=8 \
+bash scripts/e2/run_min.sh
+# then the E4 runs with CONFIGS pointing at configs/e4/*.yaml
+```
+
+**Cost.** ~2–3 GPU-h total → **~$0.50–$1.20** at $0.22–0.34/hr, versus ~$4+
+on an A100. Terminate the pod when done (per-second billing; stopped pods
+still accrue disk). `run_min.sh` prints its estimate in VND via
+`VND_PER_HOUR`; set it to the USD rate × the VND/USD rate just for the cost
+line, or ignore it.
