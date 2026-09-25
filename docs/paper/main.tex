@@ -33,7 +33,7 @@
 
 \begin{document}
 
-\title{Reverse-Engineering RLCD: What Reinforcement Learning Does (and Doesn't) Do for Calibrated Typed Decisions}
+\title{Dissecting RLCD: What Reinforcement Learning Does (and Doesn't) Do for Calibrated Typed Decisions}
 
 \author{\IEEEauthorblockN{Le Duc Minh}
 \IEEEauthorblockA{Independent Researcher\\
@@ -43,24 +43,24 @@ minh.leduc.0210@gmail.com}}
 \maketitle
 
 \begin{abstract}
-``Reinforcement Learning for Calibrated Decisions'' (RLCD) is marketed as the
-training method behind typed-decision models that return calibrated
-probabilities over a closed set of options. The method behind the closed
-model Jev is unpublished; the only open reproduction, Laya, trains with a
-noisy-logit policy-gradient term added to soft cross-entropy (CE). We show
-that this RL term is a score-function (evolution-strategies) estimator of
-the gradient of a \emph{noise-smoothed} proper scoring rule. For the log
-score, its optimum is provably sharper than the target at inference time,
-with a gap that grows with the noise scale~$\sigma$. We then run a
-13-configuration ablation that replicates Laya's fine-tune on the
-typed-decisions benchmark. At fixed $\sigma\in\{0.5,1,2\}$, the fitted
-temperature rises from 1.2 to 1.7 and target-referenced calibration error
-rises from 0.054 to 0.111. At Laya's own annealed schedule, the RL term is
-7--110$\times$ larger than the CE gradient, yet it changes nothing
-measurable except a small loss in proper scores: CE-only is at least as
-good on every metric we track. We also show that the benchmark's
-hard-label ECE rewards over-sharpening, so it is unsuitable for this
-question.
+``Reinforcement Learning for Calibrated Decisions'' (RLCD) is the training
+method behind typed-decision models that return a probability distribution
+over a closed set of options. The method behind TypeSafe's Jev is
+unpublished; the only open reproduction, Laya, adds a noisy-logit
+policy-gradient term to ordinary soft cross-entropy (CE). This report asks
+what that RL term actually does. It is a score-function
+(evolution-strategies) estimate of the gradient of a noise-smoothed proper
+scoring rule. For the log score, its optimum is provably sharper than the
+target once the noise is removed for inference, and the gap grows with the
+noise scale~$\sigma$. A 13-run ablation that reproduces Laya's fine-tune on
+the typed-decisions benchmark shows the effect at full scale: at fixed
+$\sigma\in\{0.5,1,2\}$, the temperature fitted to binary questions rises from
+1.2 to 1.7 and the target-referenced calibration error from 0.054 to 0.111.
+At Laya's own annealed schedule the RL gradient is 7--110$\times$ the CE
+gradient, yet it changes nothing measurable, and CE alone is at least as good
+on every metric we track. The benchmark's hard labels turn out to be the
+teacher's argmax, which makes hard-label ECE reward over-sharpening; we
+propose scoring against the target distribution instead.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -72,91 +72,89 @@ non-autoregressive models, evolution strategies
 \section{Introduction}
 
 A new class of ``System One'' models answers structured questions about
-unstructured state in a single forward pass. Instead of generating text,
-they return a probability distribution over a closed, typed set of options:
-a \emph{choice} among named options, an ordinal \emph{score}, or a binary
+unstructured state in a single forward pass. No text is generated. Each
+answer is a probability distribution over a closed, typed set of options: a
+\emph{choice} among named options, an ordinal \emph{score}, or a binary
 \emph{noul} probability. TypeSafe's Jev~\cite{typesafe_blog} is the most
-visible example. Its central promise is that the probabilities are
-calibrated: an answer given with 0.8 confidence should be right about 80\%
-of the time. The method credited for this, RLCD~\cite{rlcd_explained}, has
-no published paper, reward function, dataset, or calibration
-figure~\cite{typesafe_blog,techcrunch_jev}.
+visible example. Its central promise is calibration: an answer given with 0.8
+confidence should be right about 80\% of the time. The method credited for
+it, RLCD~\cite{rlcd_explained}, has no published paper, reward function,
+dataset or calibration figure~\cite{typesafe_blog,techcrunch_jev}.
 
-Laya~\cite{laya_repo} is an open, transparent attempt at the same
-interface. It publishes code, checkpoints and an evaluation on the
-\texttt{LocalLLaMA/typed-decisions} benchmark~\cite{typed_decisions_ds}.
-Its training loop adds noise to the logits, rewards the noisy
-distributions with a proper scoring rule, and applies a REINFORCE-style
-update~\cite{williams1992reinforce} next to a soft CE term. Laya's own
-README reports a raw ECE of 0.466 that drops to 0.081 after temperature
-scaling. This suggests the RL objective, as implemented, does not by itself
-produce calibration.
+Laya~\cite{laya_repo} is an open, transparent attempt at the same interface.
+It publishes code, checkpoints and an evaluation on the
+\texttt{LocalLLaMA/typed-decisions} benchmark~\cite{typed_decisions_ds}. Its
+training loop adds noise to the logits, rewards the noisy distributions with a
+proper scoring rule, and applies a REINFORCE-style
+update~\cite{williams1992reinforce} next to a soft CE term. Laya's own README
+reports a raw ECE of 0.466, falling to 0.081 once temperature scaling is
+applied. On its face, then, the RL objective does not produce calibration by
+itself.
 
-This report asks what that RL term actually does. Our contributions:
+This report asks what that RL term actually does. There are four findings.
 \begin{enumerate}
-\item We show that Laya's RL term is an evolution-strategies
+\item It is an evolution-strategies
   estimator~\cite{salimans2017es,nesterov2017random} of the gradient of a
-  noise-smoothed scoring rule, and that as $\sigma\to 0$ it recovers the CE
-  gradient that is already present (Sec.~\ref{sec:analysis}).
-\item We prove that for the log score and binary questions, the
-  smoothed optimum is sharper than the target at noise-free inference, with
-  a gap strictly increasing in~$\sigma$. We verify the same qualitative
-  bias numerically for Laya's full reward and $K\le 77$ options
-  (Sec.~\ref{sec:analysis}, \ref{sec:e1}).
-\item We replicate Laya's fine-tune and ablate the loss in 13 runs
+  noise-smoothed scoring rule, and as $\sigma\to 0$ it returns the CE gradient
+  the model already has (Sec.~\ref{sec:analysis}).
+\item For the log score and binary questions, the smoothed optimum is sharper
+  than the target at noise-free inference, with a gap that increases strictly
+  in~$\sigma$; the same direction holds numerically for Laya's full reward and
+  $K\le 77$ options (Sec.~\ref{sec:analysis}, \ref{sec:e1}).
+\item A 13-run ablation of the loss reproduces Laya's fine-tune
   (Sec.~\ref{sec:e2}). The predicted bias appears in full at fixed
-  $\sigma\ge 0.5$. At Laya's annealed schedule the RL term dominates the
-  update yet brings no benefit over CE-only.
-\item We show that on this benchmark the gold labels are the teacher's
-  argmax, so hard-label ECE \emph{improves} as models over-sharpen. We
-  propose a target-referenced ECE that does measure the bias.
+  $\sigma\ge 0.5$, while at Laya's annealed schedule the RL term dominates the
+  update and still buys nothing over CE-only.
+\item The benchmark's gold labels are the teacher's argmax, so hard-label ECE
+  \emph{improves} as a model over-sharpens; we propose a target-referenced ECE
+  that measures the bias rather than rewarding it.
 \end{enumerate}
-Nothing in this report asserts how Jev is built. Statements about Jev are
-restricted to TypeSafe's public claims and are labeled as inference.
+Nothing in this report claims to know how Jev is built. Statements about Jev
+come from TypeSafe's public claims and are labelled as inference.
 
 % =====================================================================
 \section{Background and Related Work}
 
-\textbf{Calibration.} A predictor with confidence $c=\max_i p_i$ is
-calibrated if $\Pr(\text{correct}\mid c)=c$. Expected calibration error
-(ECE) estimates the gap with $B$ equal-width bins~\cite{naeini2015ece,guo2017calibration}:
+Calibration is a statement about a predictor's own confidence. With
+$c=\max_i p_i$ as the confidence, the predictor is calibrated if
+$\Pr(\text{correct}\mid c)=c$. Expected calibration error (ECE) estimates the
+gap with $B$ equal-width bins~\cite{naeini2015ece,guo2017calibration}:
 \begin{equation}
 \mathrm{ECE}=\sum_{b=1}^{B}\frac{|S_b|}{n}\,\Bigl|\,\overline{c}_{S_b}-\overline{a}_{S_b}\Bigr|,
 \label{eq:ece}
 \end{equation}
 where $\overline{a}$ is the empirical accuracy in the bin; we use $B=15$ on
 $c=\max_i p_i$. Temperature scaling~\cite{guo2017calibration} divides the
-logits by a scalar $T$ fitted by NLL on held-out data. $T>1$ indicates
-over-sharp raw outputs.
+logits by a scalar $T$ fitted by NLL on held-out data. A value $T>1$ says the
+raw outputs were over-sharp.
 
-\textbf{Proper scoring rules.} A scoring rule $R(q,t)$ is strictly proper
-if $\E_{y\sim t}R(q,y)$ is uniquely maximized at
-$q=t$~\cite{gneiting2007scoring}. Laya combines three: the log score
-$\sum_i t_i\log q_i$ (whose negative is soft CE), the spherical score
-$\langle t,q\rangle/\|q\|$, and, for ordinal questions, the ranked
+A scoring rule $R(q,t)$ is strictly proper if $\E_{y\sim t}R(q,y)$ is uniquely
+maximized at $q=t$~\cite{gneiting2007scoring}. Laya combines three of them:
+the log score $\sum_i t_i\log q_i$ (its negative is soft CE), the spherical
+score $\langle t,q\rangle/\|q\|$, and, for ordinal questions, the ranked
 probability score (RPS)~\cite{epstein1969rps}. Brier~\cite{brier1950} is
-$\|q-t\|_2^2$. Distillation onto teacher distributions~\cite{hinton2015distilling}
-with soft CE already optimizes a strictly proper score.
+$\|q-t\|_2^2$. Distilling onto teacher distributions~\cite{hinton2015distilling}
+with soft CE therefore already optimizes a strictly proper score.
 
-\textbf{RLHF, RLVR, RLCD.} RLHF optimizes a learned preference
-reward~\cite{christiano2017rlhf,ouyang2022instructgpt}. RLVR optimizes a
-verifiable reward~\cite{lambert2024tulu3}, often with a group-mean baseline
-as in GRPO~\cite{shao2024grpo}. RLCD, as publicly described, rewards
-calibrated typed distributions~\cite{rlcd_explained}. Sampling a
-distribution by perturbing logits and following the score function is
-Gaussian smoothing, i.e.\ evolution strategies~\cite{salimans2017es,nesterov2017random,mohamed2020mcgrad}.
+Three post-training families are relevant here. RLHF optimizes a learned
+preference reward~\cite{christiano2017rlhf,ouyang2022instructgpt}; RLVR
+optimizes a verifiable reward~\cite{lambert2024tulu3}, often with a group-mean
+baseline as in GRPO~\cite{shao2024grpo}; RLCD, as publicly described, rewards
+calibrated typed distributions~\cite{rlcd_explained}. Perturbing logits and
+following the score function is Gaussian smoothing, which is to say evolution
+strategies~\cite{salimans2017es,nesterov2017random,mohamed2020mcgrad}.
 
 % =====================================================================
 \section{Jev From the Outside (Inference)}
 \label{sec:jev}
 
-Table~\ref{tab:clues} maps TypeSafe's public claims~\cite{typesafe_blog,typesafe_docs,techcrunch_jev}
-to design choices \emph{consistent with} them. Each row is an inference,
-not a statement of fact. The claim relevant here is that no RL is needed to
-optimize a proper score against distributions from a data engine one
-controls: soft CE already does that exactly. RL earns its place only for
-non-differentiable environment rewards, sequential decisions, or steering
-data generation. None of these applies to Laya's training loop.
+Table~\ref{tab:clues} pairs what TypeSafe has said publicly with the design
+choices consistent with those claims~\cite{typesafe_blog,typesafe_docs,techcrunch_jev}.
+Every row is an inference, not a fact. The row that matters here is the last
+one: if the targets come from a data engine you control, then soft CE already
+optimizes a proper score exactly, and RL is needed only for rewards that
+cannot be differentiated, for sequential decisions, or for steering data
+generation. None of the three applies to Laya's training loop.
 
 \begin{table}[t]
 \caption{Public clues and designs consistent with them (inference only).}
@@ -181,21 +179,21 @@ Trained only on synthetic data & a controlled data engine with known label distr
 \section{Laya From the Inside}
 \label{sec:laya}
 
-\textbf{Model.} Each question is encoded as its own row:
+Each question becomes its own sequence:
 \texttt{[CLS] <type> question: <instr> [SEP] [MASK] opt$_0$ [MASK] opt$_1$ \dots\ [SEP] <state> [SEP]}.
-A ModernBERT-large encoder~\cite{warner2024modernbert} is followed by a
-type embedding, two pre-norm transformer layers and an MLP scorer. The
-scorer reads one logit $z_i$ at each option's \texttt{[MASK]} position,
-and $p=\softmax(z/T)$ at inference. We ported this model and verified
-tensor-for-tensor that Laya's released weights load into our port
-(Appendix~\ref{app:repro}).
+A ModernBERT-large encoder~\cite{warner2024modernbert} runs over it, followed
+by a type embedding, two pre-norm transformer layers and an MLP scorer. The
+scorer reads one logit $z_i$ from the hidden state at each option's
+\texttt{[MASK]}, and inference reports $p=\softmax(z/T)$. We rebuilt this
+model and checked tensor by tensor that Laya's released weights load into our
+version (Appendix~\ref{app:repro}).
 
-\textbf{Training step.} Algorithm~\ref{alg:laya} restates the training step
-of Laya's typed-decisions fine-tune notebook~\cite{laya_repo}. Two details
-differ from condensed descriptions of the method, and both matter. The
-spherical weight is 0.75. The group-centered advantages are normalized by
-\emph{their own} standard deviation; normalizing by the raw-reward standard
-deviation instead shrinks the RL gradient $\sim$90$\times$ in our tests.
+Algorithm~\ref{alg:laya} restates the training step from Laya's
+typed-decisions fine-tune notebook~\cite{laya_repo}. Two details in it are
+easy to miss, and both change the gradient. The spherical weight is 0.75, not
+the library default of 0.5. And the group-centred advantages are divided by
+their own standard deviation; using the raw-reward standard deviation instead
+shrinks the RL gradient by about 90$\times$ in our tests.
 
 \begin{algorithm}[t]
 \caption{Laya's RLCD training step (one batch).}
@@ -215,10 +213,10 @@ deviation instead shrinks the RL gradient $\sim$90$\times$ in our tests.
 \end{algorithm}
 
 Here $R(q,t)=\sum_i t_i\log q_i+0.75\,\langle t,q\rangle/\|q\|-\mathbb{1}[\text{score}]\,\mathrm{RPS}(q,t)$,
-and $\mathrm{sg}$ denotes stop-gradient. $\sigma$ is annealed linearly
-from 0.4 to 0.1 over four epochs. After training, one temperature per type
-is fitted on a held-out slice (Laya issue \#186~\cite{laya_issue186}
-records an earlier version that fitted it on training items).
+and $\mathrm{sg}$ is a stop-gradient. The noise scale $\sigma$ is annealed
+linearly from 0.4 to 0.1 over four epochs. A temperature per question type is
+fitted afterwards on a held-out slice; an earlier version fitted it on
+training items, which issue \#186~\cite{laya_issue186} records.
 
 % =====================================================================
 \section{Analysis of the RL Term}
@@ -248,25 +246,24 @@ a group-baselined Monte-Carlo estimate of the Gaussian-smoothing identity~\cite{
 \end{equation}
 where the second equality is Stein's lemma. For the log score,
 $\nabla_u R=t-\softmax(u)$, so as $\sigma\to0$ the RL term estimates
-$t-\softmax(z)$, which is exactly the negative CE gradient. The RL term is
-thus a noisy estimate of a gradient that the CE term already supplies
-exactly, plus a $\sigma$-dependent deviation.
+$t-\softmax(z)$, the negative CE gradient itself. In other words, it is a
+noisy version of a gradient CE already supplies exactly, plus a deviation
+controlled by $\sigma$.
 
 \subsection{The smoothed optimum is over-sharp}
 
-For the log score, $J_\sigma$ is concave (an average of concave
-log-softmax terms), so its maximizers are the stationary points
+For the log score, $J_\sigma$ is concave (an average of concave log-softmax
+terms), so its maximizers are the stationary points
 \begin{equation}
 \E_\epsilon\bigl[\softmax(z^\star_\sigma+\epsilon)\bigr]=t .
 \label{eq:stationary}
 \end{equation}
-The \emph{noise-averaged} prediction matches the target, but inference
-reports the \emph{noise-free} $\softmax(z^\star_\sigma)$. For binary
-questions (noul, $K{=}2$) the consequence can be proved exactly. With
-projected noise, the logit gap $d=z_1-z_2$ receives
-$\eta=\epsilon_1-\epsilon_2\sim\N(0,2\sigma^2)$, and \eqref{eq:stationary}
-becomes $F_\sigma(d^\star):=\E[s(d^\star+\eta)]=t_1$ with $s$ the logistic
-function.
+The \emph{noise-averaged} prediction matches the target, but inference reports
+the \emph{noise-free} $\softmax(z^\star_\sigma)$. For binary questions (noul,
+$K{=}2$) the consequence can be proved exactly. With projected noise, the
+logit gap $d=z_1-z_2$ receives $\eta=\epsilon_1-\epsilon_2\sim\N(0,2\sigma^2)$,
+and \eqref{eq:stationary} becomes $F_\sigma(d^\star):=\E[s(d^\star+\eta)]=t_1$
+with $s$ the logistic function.
 
 \begin{proposition}
 \label{prop:binary}
@@ -308,20 +305,20 @@ finds.
 \end{remark}
 
 For $K>2$ and for Laya's full reward we rely on numerics
-(Sec.~\ref{sec:e1}). Temperature scaling can undo much of the
-distortion: at the optimum, noise-free outputs are approximately the
-target sharpened, and a uniform $T>1$ reverses most of that.
+(Sec.~\ref{sec:e1}). Temperature scaling can undo much of the distortion: at
+the optimum, noise-free outputs are approximately the target sharpened, and a
+uniform $T>1$ reverses most of that.
 
 \subsection{Variance and advantage normalization}
 
-After normalization the advantages are $O(1)$ regardless of the reward
-scale, so \eqref{eq:es} has norm $\propto\|\epsilon\|/\sigma^2\propto
-1/\sigma$. As $\sigma$ anneals, the RL term grows relative to CE. It is
-estimated from only $G{=}4$ samples, and the batch-wide standard deviation
-rescales the effective learning rate from step to step. The group mean
-includes each sample itself, which shrinks the estimate by $(G-1)/G$.
-None of this changes the smoothed optimum, but it determines how noisy
-the path to it is (Sec.~\ref{sec:e3}).
+After normalization the advantages are $O(1)$ whatever the reward scale, so
+\eqref{eq:es} has norm $\propto\|\epsilon\|/\sigma^2\propto 1/\sigma$. As
+$\sigma$ anneals, the RL term grows relative to CE. It is estimated from only
+$G{=}4$ samples, and the batch-wide standard deviation rescales the effective
+learning rate from step to step. The group mean includes each sample itself,
+which shrinks the estimate by $(G-1)/G$. None of this changes the smoothed
+optimum, but it determines how noisy the path to it is
+(Sec.~\ref{sec:e3}).
 
 % =====================================================================
 \section{Experiments}
@@ -332,17 +329,17 @@ Every table and figure is regenerated from JSON result files.
 \subsection{E1: Toy smoothing bias}
 \label{sec:e1}
 
-We maximize \eqref{eq:jsigma} directly by reparameterized gradients
-(Adam, 4000 steps, 4096 noise samples per step), removing estimator noise
-so that only the smoothed objective's optimum is measured. For
-$t=(0.7,0.2,0.1)$ and the log score, the noise-free
-$\max_i\softmax(z^\star)_i$ is 0.700, 0.723, 0.780 and 0.905 at
-$\sigma=0,0.5,1,2$ (Fig.~\ref{fig:e1}). Laya's full reward sharpens
-slightly more: 0.923 as a choice question and 0.932 as a score question at
-$\sigma=2$. Across $K\in\{2,5,20,77\}$, peaked and near-uniform Dirichlet
-targets, and both rewards (16 configurations), $\mathrm{KL}(t\,\|\,p^\star)$
-increases monotonically in $\sigma$ in every configuration. The effect is
-largest for peaked mid-$K$ targets and smallest for near-uniform $K{=}77$.
+We maximize \eqref{eq:jsigma} directly by reparameterized gradients (Adam,
+4000 steps, 4096 noise samples per step), which removes estimator noise so
+that only the smoothed objective's optimum is measured. For $t=(0.7,0.2,0.1)$
+and the log score, the noise-free $\max_i\softmax(z^\star)_i$ is 0.700, 0.723,
+0.780 and 0.905 at $\sigma=0,0.5,1,2$ (Fig.~\ref{fig:e1}). Laya's full reward
+sharpens a little more: 0.923 as a choice question and 0.932 as a score
+question at $\sigma=2$. Sweeping $K\in\{2,5,20,77\}$, peaked and near-uniform
+Dirichlet targets, and both rewards gives 16 configurations, and in every one
+of them $\mathrm{KL}(t\,\|\,p^\star)$ increases monotonically in $\sigma$. The
+effect is largest for peaked mid-$K$ targets and smallest for near-uniform
+$K{=}77$.
 
 \begin{figure}[t]
 \centering
@@ -356,37 +353,37 @@ grows.}
 \subsection{E2: Loss ablation on real data}
 \label{sec:e2}
 
-\textbf{Setup.} We replicate Laya's typed-decisions fine-tune on one
-A100: initialization from \texttt{convaiinnovations/laya}~\cite{laya_hf},
-4 epochs, effective batch 64, AdamW with learning rate $2.5\cdot10^{-5}$ on
-the encoder and $10^{-4}$ on the head, cosine decay, clipping at 1.0,
-$G{=}4$, $\sigma$ annealed from 0.4 to 0.1, and bf16. We vary only the loss:
-CE-only ($w_\mathrm{rl}{=}0$), Laya's RL+CE, RL-only ($w_\mathrm{ce}{=}0$),
-and RL+CE at fixed $\sigma\in\{0.5,1,2\}$. We use three seeds for
-CE-only, RL+CE and $\sigma{=}1$, and one seed otherwise. All runs share a
-fixed budget and are evaluated on their final weights. Temperature is
-fitted per (type, option-count bucket) on a held-out 10\% of the
-\emph{training} cases. Test: 400 cases, 2000 questions. Our RL+CE
-replica reaches accuracy $0.773\pm0.002$ and Brier $0.054\pm0.001$,
-against 0.766 and 0.062 in Laya's README.
+We replicate Laya's typed-decisions fine-tune on a single A100. Every run
+starts from \texttt{convaiinnovations/laya}~\cite{laya_hf}, trains for 4
+epochs at effective batch 64, and uses AdamW with learning rate
+$2.5\cdot10^{-5}$ on the encoder and $10^{-4}$ on the head, cosine decay,
+gradient clipping at 1.0, $G{=}4$, $\sigma$ annealed from 0.4 to 0.1, and
+bf16. The loss is the only thing that changes: CE-only ($w_\mathrm{rl}{=}0$),
+Laya's RL+CE, RL-only ($w_\mathrm{ce}{=}0$), and RL+CE at fixed
+$\sigma\in\{0.5,1,2\}$. CE-only, RL+CE and $\sigma{=}1$ were run with three
+seeds; the rest with one. All runs share a fixed budget and are evaluated on
+their final weights, with temperature fitted per (type, option-count bucket)
+on a held-out 10\% of the \emph{training} cases. The test set holds 400 cases
+and 2000 questions. Our RL+CE replica reaches accuracy $0.773\pm0.002$ and
+Brier $0.054\pm0.001$, against 0.766 and 0.062 in Laya's README.
 
-\textbf{A benchmark caveat.} The gold label of each question equals
-$\argmax_i t_i$ on 98.4\% of test rows. It is the teacher's mode, not an
-outcome drawn from $t$. Scored as a predictor, the teacher \emph{itself}
-has hard-label ECE 0.326 (mean confidence 0.659, accuracy 0.984). A model
-that reproduced $t$ perfectly would thus look badly calibrated, and
-over-sharpening \emph{reduces} hard-label ECE by moving confidence toward
-accuracy. We therefore measure the bias against the target distribution,
-using a target-referenced ECE that replaces the 0/1 hit in \eqref{eq:ece}
-with the target's probability of the chosen option:
+One caveat about the benchmark changes how the numbers should be read. The
+gold label of each question equals $\argmax_i t_i$ on 98.4\% of test rows: it
+is the teacher's mode, not an outcome drawn from $t$. Scored as a predictor,
+the teacher itself has hard-label ECE 0.326, at mean confidence 0.659 and
+accuracy 0.984. A model that reproduced $t$ perfectly would look badly
+calibrated, and over-sharpening would \emph{lower} its hard-label ECE by
+pushing confidence toward accuracy. We therefore measure the bias against the
+target distribution, using a target-referenced ECE that swaps the 0/1 hit of
+\eqref{eq:ece} for the target's probability of the chosen option:
 \begin{equation}
 \mathrm{ECE}_t=\sum_{b}\frac{|S_b|}{n}\Bigl|\,\overline{c}_{S_b}-\overline{t[\argmax p]}_{S_b}\Bigr|,
 \label{eq:softece}
 \end{equation}
-which is 0 for $p=t$. We also report the sharpness gap
-$\overline{\max p}-\overline{\max t}$, NLL and Brier against $t$, fitted
+which is 0 when $p=t$. Alongside it we report the sharpness gap
+$\overline{\max p}-\overline{\max t}$, NLL and Brier against $t$, the fitted
 $T$, and, as the plan requires, raw and post-temperature hard-label ECE.
-Fig.~\ref{fig:rel} shows the two references side by side.
+Fig.~\ref{fig:rel} puts the two references side by side.
 
 \begin{figure}[t]
 \centering
@@ -433,35 +430,34 @@ sharper than the targets.}
 \label{fig:temp}
 \end{figure}
 
-\textbf{The bias appears at full scale.} Table~\ref{tab:e2} and
-Figs.~\ref{fig:ece}--\ref{fig:temp} show that at fixed $\sigma$ every
-target-referenced measure worsens monotonically. The sharpness gap goes
-from $+0.001$ to $+0.025$ to $+0.060$ and $\mathrm{ECE}_t$ from 0.054 to
-0.080 to 0.111, reaching 3.3$\times$ CE-only. Fitted $T$ rises for every
-type (noul: 1.22, 1.38, 1.72) and NLL rises from 0.870 to 0.932. The
-three-seed spread at $\sigma{=}1$ is an order of magnitude smaller than
-these steps. Hard-label ECE falls over the same runs (0.114, 0.083,
-0.056), as the caveat predicts. Temperature scaling recovers most of the
-NLL loss (0.932 to 0.865 at $\sigma{=}2$), consistent with a systematic
-sharpening rather than degraded ranking; accuracy is unchanged within
-noise.
+At fixed $\sigma$ the bias appears in full. Table~\ref{tab:e2} and
+Figs.~\ref{fig:ece}--\ref{fig:temp} show every target-referenced measure
+getting worse, monotonically. The sharpness gap moves from $+0.001$ to
+$+0.025$ to $+0.060$, and $\mathrm{ECE}_t$ from 0.054 to 0.080 to 0.111, or
+3.3$\times$ the CE-only value. Fitted $T$ rises for every type (binary: 1.22,
+1.38, 1.72), and NLL rises from 0.870 to 0.932. The three-seed spread at
+$\sigma{=}1$ is an order of magnitude smaller than these steps. Over the same
+runs hard-label ECE falls (0.114, 0.083, 0.056), exactly as the caveat
+predicts. Temperature scaling recovers most of the NLL loss (0.932 to 0.865 at
+$\sigma{=}2$), which points to a systematic sharpening rather than a degraded
+ranking, and accuracy is unchanged within noise.
 
-\textbf{At Laya's own schedule the RL term does nothing useful.} RL+CE and
-CE-only are indistinguishable in sharpness ($-0.017$ vs $-0.016$),
-$\mathrm{ECE}_t$ (0.036 vs 0.034) and fitted $T$. CE-only is better on NLL
-for every seed (0.861 vs 0.866, including after temperature scaling), on
-Brier (0.052 vs 0.054) and on accuracy (0.782 vs 0.773). RL-only (one seed)
-is the least accurate (0.760) but is not over-sharp. This matches the
-$O(\sigma^2)$ remark: with $\sigma\le0.4$ the bias is too small to show,
-and what remains is estimator noise. The raw hard-label ECE favors RL+CE
-(0.132 vs 0.139) only because of the caveat above.
+At Laya's own schedule the RL term does nothing useful. RL+CE and CE-only are
+indistinguishable in sharpness ($-0.017$ vs $-0.016$), in $\mathrm{ECE}_t$
+(0.036 vs 0.034) and in fitted $T$. CE-only wins on NLL for every seed (0.861
+vs 0.866, and still 0.857 vs 0.863 after temperature scaling), on Brier (0.052
+vs 0.054) and on accuracy (0.782 vs 0.773). The one-seed RL-only run is the
+least accurate of all (0.760) but is not over-sharp. This fits the $O(\sigma^2)$
+remark: at $\sigma\le0.4$ the bias is too small to see, and what is left is
+estimator noise. The raw hard-label ECE prefers RL+CE (0.132 vs 0.139) for the
+reason given above.
 
-\textbf{Where the sharpening lands.} Split by target-entropy tercile
-(Table~\ref{tab:entropy}), every model, CE-only included, is under-sharp
-on peaked targets and over-sharp on flat ones, a regression toward typical
-confidence. Increasing $\sigma$ adds a near-uniform upward shift across
-terciles. The mean gap of CE-only near zero therefore reflects two
-opposite biases, not the absence of bias.
+The sharpening is not uniform. Split by target-entropy tercile
+(Table~\ref{tab:entropy}), every model, CE-only included, is under-sharp on
+peaked targets and over-sharp on flat ones, as if regressing toward typical
+confidence. Raising $\sigma$ adds a near-uniform upward shift across the
+terciles. The near-zero mean gap of CE-only is the sum of two opposite
+biases, not evidence that no bias exists.
 
 \begin{table}[t]
 \caption{Sharpness gap $\overline{\max p}-\overline{\max t}$ by target-entropy tercile (mean $H(t)$: 0.38 / 0.82 / 1.12 nats).}
@@ -479,19 +475,18 @@ Configuration & peaked & mid & flat \\
 \subsection{E3: Gradient quality}
 \label{sec:e3}
 
-Every 10 optimizer steps we compare \eqref{eq:es} with the CE gradient,
-both taken with respect to the logits and each from a fresh noise draw
+Every 10 optimizer steps we compare \eqref{eq:es} against the CE gradient,
+both with respect to the logits and each drawn from a fresh noise sample
 (Table~\ref{tab:e3}, Fig.~\ref{fig:grad}). Under Laya's schedule the RL
 gradient is 8$\times$ the CE gradient at $\sigma{=}0.4$ and 87$\times$ at
-$\sigma{=}0.1$. Before clipping it therefore dominates the update, and its
-alignment with CE is only moderate (cosine $\approx0.65$). In the fixed-$\sigma$
-runs, where $\sigma$ is not confounded with training progress, the norm
-ratio scales as $1/\sigma$ (ratio$\times\sigma\approx$ 5.2, 4.9, 4.3) and
-the alignment falls from 0.60 to 0.52 to 0.37 as the smoothed gradient
-departs from the CE gradient. Despite its size, the RL term leaves the
-final model essentially where CE alone would put it. This is consistent
-with a noisy, roughly unbiased proxy for the CE direction at small
-$\sigma$.
+$\sigma{=}0.1$, so before clipping it dominates the update; its alignment with
+CE is only moderate (cosine $\approx0.65$). In the fixed-$\sigma$ runs, where
+$\sigma$ is not entangled with training progress, the ratio scales as
+$1/\sigma$ (ratio$\times\sigma\approx$ 5.2, 4.9, 4.3) and alignment falls from
+0.60 to 0.52 to 0.37 as the smoothed gradient drifts from the CE gradient.
+Size notwithstanding, the RL term leaves the final model about where CE alone
+would leave it. Everything is consistent with a noisy but roughly unbiased
+proxy for the CE direction at small $\sigma$.
 
 \begin{table}[t]
 \caption{E3: RL vs.\ CE logit gradients ($n$ = runs).}
@@ -515,64 +510,65 @@ $1/\sigma$; (b)~alignment with the CE gradient falls as $\sigma$ grows.}
 \end{figure}
 
 \subsection{Reproducibility}
-A second run of RL+CE seed 42 reproduced the first closely (NLL 0.864 /
-0.867, accuracy 0.772 / 0.772), though not bitwise. One earlier seed-42
-run, the first job on a fresh machine, matched the others at step 1 and
-then diverged to accuracy 0.697 and NLL 0.936. Its cause is undetermined
-(a first-time kernel compilation is the leading suspect). It is excluded
-from the tables and archived with the results.
+A second run of RL+CE seed 42 matched the first closely (NLL 0.864 / 0.867,
+accuracy 0.772 / 0.772), though not bitwise. An earlier seed-42 run is a
+different story: it was the first training job on a fresh machine, matched the
+others exactly at step 1, and then diverged to accuracy 0.697 and NLL 0.936.
+We could not pin down the cause; our best guess is the first
+\texttt{torch.compile}/Triton build, since \texttt{gcc} had been installed
+minutes earlier. We keep it out of the tables but archive it with the
+results.
 
 % =====================================================================
 \section{Toward a Principled RLCD Pipeline}
 \label{sec:principled}
 
-If the goal is calibrated typed distributions, the analysis above implies
-the following. Stage one is distillation, i.e.\ soft CE against targets
-from a controlled data engine: exact labels where the latent state is
-known, known posteriors where noise is injected, and teacher ensembles
-otherwise. Reinforcement learning should be reserved for what CE cannot
-provide: non-differentiable workflow rewards, sequential decisions
-(temporal-difference targets), and a separate action/escalation head whose
-utility never feeds the probability head. Calibration should then be
-enforced where it is measurable: mining (type, $K$, length, language)
-buckets with high target-referenced error for more data, consistency
-regularizers (negation pairs summing to one, option-permutation and
-irrelevant-context invariance), and temperature per (type, $K$). A large
-fitted temperature signals that an upstream stage distorted the
-distributions. Evaluation should report raw target-referenced calibration
-next to post-temperature numbers, and use labels drawn from distributions
-(e.g.\ multi-annotator sets such as ChaosNLI~\cite{nie2020chaosnli})
-whenever outcome calibration is claimed. This is a proposal, not a
-description of any existing system.
+If the goal is calibrated typed distributions, the analysis above suggests the
+following. Begin with distillation: soft CE against targets from a controlled
+data engine, with exact labels where the latent state is known, known
+posteriors where noise is injected, and teacher ensembles otherwise. Save
+reinforcement learning for what CE cannot do, such as non-differentiable
+workflow rewards, sequential decisions with temporal-difference targets, and a
+separate action/escalation head whose utility never reaches the probability
+head. Then enforce calibration where it can be measured: mine (type, $K$,
+length, language) buckets with high target-referenced error and generate more
+data there; add consistency regularizers for negation pairs (which should sum
+to one), option permutation and irrelevant context; and fit a temperature per
+(type, $K$), treating a large fitted value as a sign that an upstream stage
+distorted the distribution. Evaluation should always show raw
+target-referenced calibration beside the post-temperature numbers, and should
+use labels drawn from distributions, for instance multi-annotator sets such as
+ChaosNLI~\cite{nie2020chaosnli}, whenever calibration on outcomes is claimed.
+This last part is a proposal; it describes no existing system.
 
 % =====================================================================
 \section{Limitations}
 
-Jev is closed: Sec.~\ref{sec:jev} is inference from public claims, and
-nothing here tests Jev. We use one benchmark, whose labels are teacher
-modes; the benchmark's ceiling of teacher self-agreement (0.735) makes
-small accuracy gaps weak evidence, so we lead with proper scores and fitted
-temperatures. Three configurations have a single seed. All runs start from
-a checkpoint that Laya had already trained with RLCD, which favors
-RL-only. Proposition~\ref{prop:binary} covers the log score with $K{=}2$;
-the general-$K$ and full-reward cases rest on numerics. The E3 diagnostics
-are logit-level, not parameter-level. The model scale is fixed
-(421M parameters).
+Jev is closed. Sec.~\ref{sec:jev} infers from public claims and tests nothing
+about Jev itself. The experiments use a single benchmark whose labels are
+teacher modes, so small accuracy differences are weak evidence; the teacher's
+self-agreement ceiling is 0.735, which is why we lead with proper scores and
+fitted temperatures. Three configurations have a single seed. All runs start
+from a checkpoint Laya had already trained with RLCD, which can only help
+RL-only. Proposition~\ref{prop:binary} covers the log score at $K{=}2$; the
+general-$K$ and full-reward cases rest on numerics. The E3 diagnostics are
+taken at the logits, not the parameters. Model scale is fixed at 421M
+parameters.
 
 % =====================================================================
 \section{Conclusion}
 
-Laya's RL term optimizes a noise-smoothed proper score. As $\sigma\to0$
-that objective becomes the CE the model already minimizes, and for
-$\sigma>0$ its optimum is over-sharp at inference. We prove this for
-binary questions, show it numerically for Laya's full reward, and observe
-it at full scale: fitted temperature and target-referenced calibration
-error grow monotonically with $\sigma$. At Laya's own small, annealed
-$\sigma$, the RL term dominates the gradient yet leaves calibration
-unchanged and proper scores slightly worse than CE-only. On this evidence,
-the calibration of Laya-style typed-decision models comes from distillation
-and temperature scaling, not from the RL term. On benchmarks whose labels
-are teacher modes, hard-label ECE should not be used to argue otherwise.
+Laya's RL term optimizes a noise-smoothed proper score. As $\sigma\to0$ that
+objective becomes the CE the model already minimizes; for $\sigma>0$ its
+optimum is over-sharp at inference. We proved this for binary questions, saw
+it numerically for Laya's full reward, and watched it hold at full scale:
+fitted temperature and target-referenced calibration error both rise
+monotonically with $\sigma$. At Laya's own small annealed $\sigma$, the RL term
+dominates the gradient and still leaves calibration unchanged while proper
+scores get slightly worse than CE-only. For Laya-style typed-decision models,
+then, the calibration comes from distillation and temperature scaling, not
+from the RL term. On benchmarks whose labels are teacher modes, hard-label ECE
+should not be used to argue otherwise.
 
 \section*{Acknowledgment}
 The author thanks the Laya authors for releasing their code, checkpoints,
@@ -588,21 +584,20 @@ been possible.
 \section{Reproduction details}
 \label{app:repro}
 
-\textbf{Weight parity.} Laya's \texttt{model.safetensors} contains 206
-tensors. Of these, 201 map one-to-one onto our model (encoder, head, type
-embedding, scorer). The five others are the unused action head and a
-per-type temperature. Tokenizers are identical to ModernBERT-large's.
-Before fine-tuning, the released base checkpoint already has hard-label
-ECE 0.215 on a 60-row slice. Its shipped per-type temperatures
-(1.64 / 1.25 / 1.98) are all $>1$.
+Laya's \texttt{model.safetensors} holds 206 tensors. Of these, 201 map
+one-to-one onto our model (encoder, head, type embedding, scorer); the other
+five are an unused action head and a per-type temperature. Tokenizers are
+identical to ModernBERT-large's. Before fine-tuning, the released base
+checkpoint already scores hard-label ECE 0.215 on a 60-row slice, and its
+shipped per-type temperatures (1.64 / 1.25 / 1.98) are all $>1$.
 
-\textbf{Deliberate differences from the notebook.} bf16 instead of
-fp16 with loss scaling; a case-level instead of row-level calibration
-split; temperature per (type, $K$-bucket) instead of per type; one GPU
-with effective batch 64 instead of two GPUs.
+Against the notebook we make four deliberate changes: bf16 instead of fp16 with
+loss scaling; a case-level instead of row-level calibration split; temperature
+per (type, $K$-bucket) instead of per type; and one GPU with effective batch
+64 instead of two GPUs.
 
-\textbf{Compute.} One A100-SXM4-40GB. Each run took about 8 minutes
-(5.5 of training); the 13 runs plus setup cost about 2.4 GPU-hours.
+All runs fit in one A100-SXM4-40GB. Each took about 8 minutes (5.5 of them
+training); the 13 runs plus setup came to about 2.4 GPU-hours.
 
 \begin{table}[h]
 \caption{All E2 runs (test set; raw logits).}
