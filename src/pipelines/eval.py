@@ -13,13 +13,14 @@ raw metrics, since fitting temperature every epoch is unnecessary and the
 monitored metric (`raw_ece`) is deliberately the *pre-calibration* one.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import torch
 
 from src.config import QTYPES
 from src.modules.model import DecisionModel
-from src.utils.io_utils import save_json
+from src.utils.io_utils import load_json, save_json
 
 
 def k_bucket(k: int, boundaries: tuple[int, ...] = (2, 5, 10)) -> int:
@@ -182,11 +183,17 @@ def fit_temperature(
     return float(log_t.detach().exp().clamp(0.5, 5.0))
 
 
-def fit_temperatures(rows: list[dict]) -> dict[tuple[int, int], float]:
-    """Fit one temperature per (qtype, K-bucket) group present in `rows`."""
+def fit_temperatures(
+    rows: list[dict], boundaries: tuple[int, ...] = (2, 5, 10)
+) -> dict[tuple[int, int], float]:
+    """Fit one temperature per (qtype, K-bucket) group present in `rows`.
+
+    `boundaries` must match `DecisionModelConfig.k_buckets` when the result is
+    written back into the model's temperature buffer.
+    """
     groups: dict[tuple[int, int], list[dict]] = {}
     for row in rows:
-        key = (row["qtype"], k_bucket(row["k"]))
+        key = (row["qtype"], k_bucket(row["k"], boundaries))
         groups.setdefault(key, []).append(row)
 
     temperatures = {}
@@ -211,23 +218,136 @@ def _pad_1d(x: torch.Tensor, length: int, value: float) -> torch.Tensor:
 
 
 def _scale_rows(
-    rows: list[dict], temperatures: dict[tuple[int, int], float]
+    rows: list[dict],
+    temperatures: dict[tuple[int, int], float],
+    boundaries: tuple[int, ...] = (2, 5, 10),
 ) -> list[dict]:
     scaled_rows = []
     for row in rows:
-        key = (row["qtype"], k_bucket(row["k"]))
+        key = (row["qtype"], k_bucket(row["k"], boundaries))
         t = temperatures.get(key, 1.0)
         scaled_rows.append({**row, "logits": row["logits"] / t})
     return scaled_rows
 
 
+def fill_model_temperature(
+    model: DecisionModel,
+    temperatures: dict[tuple[int, int], float],
+    boundaries: tuple[int, ...] = (2, 5, 10),
+) -> None:
+    """Write fitted temperatures into `model.temperature` (a
+    `(num_qtypes, num_buckets)` buffer) so the calibration travels with the
+    checkpoint's state_dict. Groups absent from `temperatures` stay at 1.0.
+    """
+    with torch.no_grad():
+        model.temperature.fill_(1.0)
+        for (qtype, bucket), value in temperatures.items():
+            if (
+                0 <= qtype < model.temperature.shape[0]
+                and 0 <= bucket < model.temperature.shape[1]
+            ):
+                model.temperature[qtype, bucket] = value
+
+
+def temperature_for(
+    model: DecisionModel,
+    qtype: int,
+    k: int,
+    boundaries: tuple[int, ...] = (2, 5, 10),
+) -> float:
+    """Fitted temperature for one row's (qtype, option count), defaulting to
+    1.0 for an unknown group."""
+    bucket = k_bucket(k, boundaries)
+    if (
+        0 <= qtype < model.temperature.shape[0]
+        and 0 <= bucket < model.temperature.shape[1]
+    ):
+        return float(model.temperature[qtype, bucket])
+    return 1.0
+
+
+def save_temperatures(
+    temperatures: dict[tuple[int, int], float],
+    boundaries: tuple[int, ...],
+    path: str | Path,
+) -> None:
+    """Persist fitted temperatures for `src.pipelines.infer` — the JSON
+    sidecar written next to a checkpoint.
+    """
+    save_json(
+        {
+            "k_buckets": list(boundaries),
+            "temperatures": [
+                {"qtype": int(q), "bucket": int(b), "T": float(t)}
+                for (q, b), t in sorted(temperatures.items())
+            ],
+        },
+        path,
+    )
+
+
+def load_temperatures(
+    path: str | Path,
+) -> tuple[dict[tuple[int, int], float], tuple[int, ...]]:
+    """Inverse of `save_temperatures`: returns
+    `(temperatures, boundaries)`.
+    """
+    data = load_json(path)
+    boundaries = tuple(int(b) for b in data.get("k_buckets", (2, 5, 10)))
+    temperatures = {
+        (int(e["qtype"]), int(e["bucket"])): float(e["T"]) for e in data["temperatures"]
+    }
+    return temperatures, boundaries
+
+
 def apply_temperature(
-    rows: list[dict], temperatures: dict[tuple[int, int], float], n_bins: int = 15
+    rows: list[dict],
+    temperatures: dict[tuple[int, int], float],
+    n_bins: int = 15,
+    boundaries: tuple[int, ...] = (2, 5, 10),
 ) -> dict[str, object]:
     """Re-score `rows` with `logits / T[qtype, k_bucket]` and report the
     same metric dict as `raw_metrics`.
     """
-    return _rows_to_metrics(_scale_rows(rows, temperatures), n_bins)
+    return _rows_to_metrics(_scale_rows(rows, temperatures, boundaries), n_bins)
+
+
+@torch.no_grad()
+def paired_bootstrap_diff(
+    a: Sequence[float] | torch.Tensor,
+    b: Sequence[float] | torch.Tensor,
+    n_boot: int = 2000,
+    seed: int = 0,
+    alpha: float = 0.05,
+) -> dict[str, float]:
+    """Paired bootstrap CI for the mean difference ``a - b`` over shared items.
+
+    Use it on per-row scores (e.g. NLL) of two configurations evaluated on the
+    same test rows, so the item-to-item spread cancels and only the systematic
+    gap is tested. Returns the observed ``mean``, the ``[lo, hi]`` percentile
+    interval, and a two-sided bootstrap ``p`` (twice the fraction of resampled
+    means on the opposite side of zero, capped at 1).
+    """
+    a_t = torch.as_tensor(a, dtype=torch.float64)
+    b_t = torch.as_tensor(b, dtype=torch.float64)
+    if a_t.shape != b_t.shape:
+        raise ValueError(f"paired inputs must match: {a_t.shape} vs {b_t.shape}")
+    diff = a_t - b_t
+    n = diff.shape[0]
+    if n == 0:
+        nan = float("nan")
+        return {"mean": nan, "lo": nan, "hi": nan, "p": nan, "n": 0}
+    generator = torch.Generator().manual_seed(seed)
+    idx = torch.randint(0, n, (n_boot, n), generator=generator)
+    boot = diff[idx].mean(dim=1)
+    p = 2 * min(float((boot <= 0).double().mean()), float((boot >= 0).double().mean()))
+    return {
+        "mean": float(diff.mean()),
+        "lo": float(torch.quantile(boot, alpha / 2)),
+        "hi": float(torch.quantile(boot, 1 - alpha / 2)),
+        "p": min(p, 1.0),
+        "n": n,
+    }
 
 
 @torch.no_grad()
@@ -251,20 +371,24 @@ def evaluate(
     test_loader,
     device: torch.device,
     save_json_path: str | Path | None = None,
+    save_temperatures_path: str | Path | None = None,
 ) -> dict[str, object]:
     """Full evaluation: fit temperature on `calib_loader`, report raw and
     post-temperature metrics on `test_loader`, plus the fitted temperatures
-    themselves. Thin wrapper — the single place that decides how a result
-    is persisted.
+    themselves. Fitted values are also written into `model.temperature` so a
+    checkpoint saved afterwards carries its calibration, and optionally to a
+    JSON sidecar for `src.pipelines.infer`.
     """
+    boundaries = tuple(model.cfg.k_buckets)
     calib_rows = collect_rows(model, calib_loader, device)
     test_rows = collect_rows(model, test_loader, device)
 
-    temperatures = fit_temperatures(calib_rows)
+    temperatures = fit_temperatures(calib_rows, boundaries)
+    fill_model_temperature(model, temperatures, boundaries)
     result = {
         "raw": _metrics_with_breakdown(test_rows),
         "post_temperature": _metrics_with_breakdown(
-            _scale_rows(test_rows, temperatures)
+            _scale_rows(test_rows, temperatures, boundaries)
         ),
         "fitted_temperature": {
             f"type{k[0]}_bucket{k[1]}": v for k, v in temperatures.items()
@@ -272,6 +396,8 @@ def evaluate(
     }
     if save_json_path is not None:
         save_json(result, save_json_path)
+    if save_temperatures_path is not None:
+        save_temperatures(temperatures, boundaries, save_temperatures_path)
     return result
 
 

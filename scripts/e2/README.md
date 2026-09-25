@@ -74,3 +74,17 @@ For each run, `results/<run_name>/` contains:
 
 `results/e2_logs/` also holds the full stdout of each run, the GPU and driver
 info, `pip freeze`, and `GIT_REV.txt`.
+
+## Reproducing the paper without a GPU
+
+The weights, per-run JSONs and `logits.pt` are mirrored to a Hugging Face
+artifact repo by `export_to_hf.py` (public by default; pass `--private` to
+keep one private). On any machine:
+
+```bash
+uv run python scripts/e2/fetch_hf.py --repo minhleduc/rlcd-e2-checkpoints --with_logits
+uv run python scripts/e2/summarize.py --runs_dir results/e2_vm/results --json results/e2_summary.json
+```
+
+That is exactly what `docs/paper/README.md` assumes, so the paper's tables and
+figures regenerate without ever renting a GPU.

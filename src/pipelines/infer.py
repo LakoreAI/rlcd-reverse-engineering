@@ -24,6 +24,11 @@ from src.config import QTYPES, DecisionModelConfig
 from src.data import build_sequence, option_keys
 from src.modules.loss import predict, probabilities
 from src.modules.model import DecisionModel
+from src.pipelines.eval import (
+    fill_model_temperature,
+    load_temperatures,
+    temperature_for,
+)
 from src.utils.model_utils import detect_device
 
 
@@ -42,6 +47,17 @@ def load_model(ckpt_path: Path, device: torch.device):
     cfg = config_from_checkpoint(raw)
     model = DecisionModel(cfg).to(device)
     model.load_state_dict(raw["model"])
+
+    # A fitted-temperature sidecar (written by train.py's final evaluate) uses
+    # the same K-bucket boundaries as the model; fall back to the config.
+    boundaries = tuple(cfg.k_buckets)
+    sidecar = ckpt_path.parent / "temperatures.json"
+    if sidecar.exists():
+        temperatures, boundaries = load_temperatures(sidecar)
+        fill_model_temperature(model, temperatures, boundaries)
+        print(f"applied fitted temperatures from {sidecar}")
+    model._temperature_boundaries = boundaries
+
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(cfg.encoder_name)
     return model, cfg, tokenizer
@@ -53,8 +69,14 @@ def infer(
     state: str,
     question: dict,
     out_path: Path | None = None,
+    apply_temperature: bool = True,
 ) -> dict:
-    """Score `question` against `state` with the model at `ckpt_path`."""
+    """Score `question` against `state` with the model at `ckpt_path`.
+
+    Applies the checkpoint's fitted `softmax(z / T)` unless
+    `apply_temperature=False` (`--raw` on the CLI), which is what the paper
+    describes for inference.
+    """
     device = detect_device()
     model, cfg, tokenizer = load_model(ckpt_path, device)
 
@@ -68,12 +90,24 @@ def infer(
     qtype = torch.tensor([QTYPES[question["type"]]], dtype=torch.long, device=device)
 
     logits = model(ids_t, attention_mask, marker_pos, marker_mask, qtype)
+    temperature = 1.0
+    if apply_temperature:
+        temperature = temperature_for(
+            model,
+            int(qtype.item()),
+            len(markers),
+            getattr(model, "_temperature_boundaries", tuple(cfg.k_buckets)),
+        )
+        logits = logits / temperature
     probs = probabilities(logits)
     pred_idx = int(predict(logits)[0])
     keys = option_keys(question)
 
     print(f"checkpoint: {ckpt_path}")
     print(f"question type: {question['type']}   options: {keys}")
+    print(
+        f"temperature: {temperature:.3f} ({'raw' if not apply_temperature else 'fitted'})"
+    )
     print(
         f"predicted: {keys[pred_idx]}   "
         f"probabilities: {dict(zip(keys, (round(p, 4) for p in probs[0].tolist())))}"
@@ -84,6 +118,7 @@ def infer(
         "probabilities": probs.cpu(),
         "predicted_key": keys[pred_idx],
         "option_keys": keys,
+        "temperature": temperature,
     }
     if out_path is not None:
         torch.save(result, out_path)
@@ -99,5 +134,16 @@ if __name__ == "__main__":
         "--question", type=str, required=True, help="JSON question dict"
     )
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="skip the fitted temperature (report softmax(z) instead of softmax(z/T))",
+    )
     args = parser.parse_args()
-    infer(args.ckpt, args.state, json.loads(args.question), args.out)
+    infer(
+        args.ckpt,
+        args.state,
+        json.loads(args.question),
+        args.out,
+        apply_temperature=not args.raw,
+    )

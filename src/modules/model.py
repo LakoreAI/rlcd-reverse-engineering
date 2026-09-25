@@ -54,9 +54,11 @@ class DecisionModel(nn.Module):
         self.scorer = nn.Sequential(
             nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1)
         )
-        # Per-(qtype, K-bucket) temperature, fit post-hoc by
-        # src.pipelines.eval.fit_temperatures and stored here so a
-        # checkpoint carries its calibration alongside its weights.
+        # Per-(qtype, K-bucket) temperature, fitted post-hoc by
+        # src.pipelines.eval.evaluate (via fit_temperatures +
+        # fill_model_temperature) and persisted both in this buffer and as a
+        # `temperatures.json` sidecar, so a checkpoint can carry its
+        # calibration alongside its weights.
         num_buckets = len(cfg.k_buckets) + 1
         self.register_buffer("temperature", torch.ones(cfg.num_qtypes, num_buckets))
 

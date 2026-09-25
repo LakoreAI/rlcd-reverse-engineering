@@ -17,6 +17,7 @@ Usage:
 import argparse
 import math
 import random
+import shutil
 import time
 from dataclasses import asdict
 from functools import partial
@@ -603,6 +604,12 @@ def train(train_cfg: TrainingConfig):
             test_loader,
             device,
             save_json_path=result_dir / "test_eval.json",
+            save_temperatures_path=result_dir / "temperatures.json",
+        )
+        # Mirror the sidecar next to the checkpoints so `infer.py` finds the
+        # fitted temperature without being pointed at result_dir.
+        shutil.copyfile(
+            result_dir / "temperatures.json", ckpt_dir / "temperatures.json"
         )
         print("\nfinal test evaluation:")
         print(format_report(final_result))

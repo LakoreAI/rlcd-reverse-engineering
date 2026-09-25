@@ -16,11 +16,12 @@ regenerates from the result files.
 ## Rebuild
 
 ```bash
-# 1. result files (E1 is CPU-only; E2 inputs come from the rented-GPU runs,
-#    see docs/reports/2026-09-25/e2_minimal_runs.md)
+# 1. result files (E1 is CPU-only; E2 inputs are downloaded from the public
+#    artifact repo, see docs/reports/2026-09-25/e2_minimal_runs.md)
 uv run python experiments/e1_toy_bias.py                    # results/e1_toy_bias.json
+uv run python scripts/e2/fetch_hf.py --repo minhleduc/rlcd-e2-checkpoints --with_logits
 uv run python scripts/e2/summarize.py --runs_dir results/e2_vm/results --json results/e2_summary.json
-uv run python scripts/e2/row_analysis.py                    # results/e2_row_analysis.json (needs checkpoints/e2/*/logits.pt)
+uv run python scripts/e2/row_analysis.py                    # results/e2_row_analysis.json (needs the fetched logits.pt)
 
 # 2. figures and tables
 uv run python docs/paper/figures/make_figures.py

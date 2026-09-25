@@ -9,7 +9,9 @@ it with the run's results into `<repo>/<run_name>/`:
     model_config.json   DecisionModelConfig the weights were trained with
     test_eval.json  train_log.json  grad_diagnostics.json  config.json
 
-Needs HF_TOKEN in the environment. Usage:
+Needs HF_TOKEN in the environment. Creates a **public** repo by default so
+the paper's result files are actually publicly reachable; pass `--private`
+for a private one. Usage:
     uv run python scripts/e2/export_to_hf.py --run_name e2_laya_rlce_seed42 \
         --repo minhleduc/rlcd-e2-checkpoints
 """
@@ -34,6 +36,11 @@ def main() -> None:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--ckpt_dir", default=str(REPO_ROOT / "checkpoints"))
     parser.add_argument("--result_dir", default=str(REPO_ROOT / "results"))
+    parser.add_argument(
+        "--private",
+        action="store_true",
+        help="create/keep the repo private (default: public, so results are reachable)",
+    )
     args = parser.parse_args()
 
     run_ckpt = Path(args.ckpt_dir) / args.run_name
@@ -65,7 +72,9 @@ def main() -> None:
                 shutil.copy(src, out / name)
 
         api = HfApi()
-        api.create_repo(args.repo, repo_type="model", private=True, exist_ok=True)
+        api.create_repo(
+            args.repo, repo_type="model", private=args.private, exist_ok=True
+        )
         api.upload_folder(
             folder_path=str(out),
             path_in_repo=args.run_name,

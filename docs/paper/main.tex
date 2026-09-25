@@ -56,7 +56,7 @@ noise scale~$\sigma$. A 13-run ablation that reproduces Laya's fine-tune on
 the typed-decisions benchmark shows the effect at full scale: at fixed
 $\sigma\in\{0.5,1,2\}$, the temperature fitted to binary questions rises from
 1.2 to 1.7 and the target-referenced calibration error from 0.054 to 0.111.
-At Laya's own annealed schedule the RL gradient is 7--110$\times$ the CE
+At Laya's own annealed schedule the RL gradient is 8--87$\times$ the CE
 gradient, yet it changes nothing measurable, and CE alone is at least as good
 on every metric we track. The benchmark's hard labels turn out to be the
 teacher's argmax, which makes hard-label ECE reward over-sharpening; we
@@ -137,7 +137,9 @@ $\|q-t\|_2^2$. Distilling onto teacher distributions~\cite{hinton2015distilling}
 with soft CE therefore already optimizes a strictly proper score.
 
 Three post-training families are relevant here. RLHF optimizes a learned
-preference reward~\cite{christiano2017rlhf,ouyang2022instructgpt}; RLVR
+preference reward~\cite{christiano2017rlhf,ouyang2022instructgpt}, and
+post-training of this kind has itself been observed to degrade
+calibration~\cite{kadavath2022language,openai2023gpt4}; RLVR
 optimizes a verifiable reward~\cite{lambert2024tulu3}, often with a group-mean
 baseline as in GRPO~\cite{shao2024grpo}; RLCD, as publicly described, rewards
 calibrated typed distributions~\cite{rlcd_explained}. Perturbing logits and
@@ -230,7 +232,9 @@ the zero-mean-projected noise of Algorithm~\ref{alg:laya}. Define
 J_\sigma(z)=\E_{\epsilon}\bigl[R(\softmax(z+\epsilon),t)\bigr].
 \label{eq:jsigma}
 \end{equation}
-Since $\nabla_z\log\N(\mathrm{sg}(z)+\epsilon\mid z,\sigma^2 I)=\epsilon/\sigma^2$,
+The projected noise lies in $\mathrm{range}(P)$, so the pseudoinverse score
+under $\N(0,\sigma^2P)$ reduces to $\epsilon/\sigma^2$ and
+$\nabla_z\log\N(\mathrm{sg}(z)+\epsilon\mid z,\sigma^2 I)=\epsilon/\sigma^2$,
 the gradient of $L_\mathrm{RL}$ is
 \begin{equation}
 -\nabla_z L_\mathrm{RL}=\frac{1}{GB\,\sigma^2}\sum_{g}a_g\,\epsilon_g,
@@ -489,7 +493,7 @@ would leave it. Everything is consistent with a noisy but roughly unbiased
 proxy for the CE direction at small $\sigma$.
 
 \begin{table}[t]
-\caption{E3: RL vs.\ CE logit gradients ($n$ = runs).}
+\caption{E3: RL vs.\ CE logit gradients ($n$ = runs logging the diagnostic; the annealed rows also include CE-only and RL-only runs, whose RL gradient was computed with weight~0).}
 \label{tab:e3}
 \centering
 \footnotesize

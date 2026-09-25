@@ -53,7 +53,14 @@ def main() -> None:
         raise RuntimeError("--calib_fraction must be > 0 to fit temperature")
 
     result = evaluate(
-        model, calib_loader, test_loader, device, save_json_path=args.json
+        model,
+        calib_loader,
+        test_loader,
+        device,
+        save_json_path=args.json,
+        save_temperatures_path=(
+            args.json.with_name("temperatures.json") if args.json else None
+        ),
     )
     print(format_report(result))
 

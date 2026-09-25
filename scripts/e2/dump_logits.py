@@ -84,10 +84,13 @@ def main() -> None:
                 r["logits"] = r["logits"].float()
         torch.save({"calib": calib_rows, "test": test_rows}, d / "logits.pt")
 
-        temps = fit_temperatures(calib_rows)
+        boundaries = tuple(model_cfg.k_buckets)
+        temps = fit_temperatures(calib_rows, boundaries)
         result = {
             "raw": _metrics_with_breakdown(test_rows),
-            "post_temperature": _metrics_with_breakdown(_scale_rows(test_rows, temps)),
+            "post_temperature": _metrics_with_breakdown(
+                _scale_rows(test_rows, temps, boundaries)
+            ),
             "fitted_temperature": {
                 f"type{k[0]}_bucket{k[1]}": v for k, v in temps.items()
             },

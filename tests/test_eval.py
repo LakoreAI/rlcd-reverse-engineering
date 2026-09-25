@@ -13,11 +13,16 @@ from src.pipelines.eval import (
     eval_per_epoch,
     evaluate,
     expected_calibration_error,
+    fill_model_temperature,
     fit_temperature,
     fit_temperatures,
     format_report,
     k_bucket,
+    load_temperatures,
+    paired_bootstrap_diff,
     raw_metrics,
+    save_temperatures,
+    temperature_for,
 )
 
 
@@ -199,3 +204,64 @@ def test_evaluate_reports_by_type_breakdown(dummy_encoder):
     )
     assert set(result["raw"]["by_type"]) == {"noul"}
     assert result["raw"]["by_type"]["noul"]["n"] == 8
+
+
+def test_fill_and_read_model_temperature(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder)
+    temps = {(0, k_bucket(4)): 2.5, (2, 0): 1.8}
+    fill_model_temperature(model, temps, cfg.k_buckets)
+
+    assert abs(float(model.temperature[0, k_bucket(4)]) - 2.5) < 1e-6
+    assert abs(temperature_for(model, 0, 4, cfg.k_buckets) - 2.5) < 1e-6
+    # a group with no fitted value stays at 1.0
+    assert temperature_for(model, 1, 4, cfg.k_buckets) == 1.0
+
+
+def test_save_load_temperatures_roundtrip(tmp_path):
+    temps = {(0, 0): 1.1, (2, 3): 2.2}
+    path = tmp_path / "temperatures.json"
+    save_temperatures(temps, (2, 5, 10), path)
+
+    loaded, boundaries = load_temperatures(path)
+    assert boundaries == (2, 5, 10)
+    assert loaded == temps
+
+
+def test_paired_bootstrap_diff_detects_consistent_shift():
+    result = paired_bootstrap_diff([1.0] * 200, [0.0] * 200, n_boot=500, seed=0)
+    assert abs(result["mean"] - 1.0) < 1e-9
+    assert result["lo"] <= result["mean"] <= result["hi"]
+    assert result["p"] < 0.01
+
+
+def test_paired_bootstrap_diff_null_is_centered():
+    a = torch.arange(200, dtype=torch.float32)
+    result = paired_bootstrap_diff(a, a.flip(0), n_boot=500, seed=0)
+    assert abs(result["mean"]) < 1e-9
+    assert 0.0 <= result["p"] <= 1.0
+
+
+def test_evaluate_populates_and_persists_temperature(dummy_encoder, tmp_path):
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    sidecar = tmp_path / "temperatures.json"
+
+    result = evaluate(
+        model,
+        make_loader(16, qtype=0, k=4),
+        make_loader(12, qtype=0, k=4),
+        torch.device("cpu"),
+        save_temperatures_path=sidecar,
+    )
+
+    key = f"type0_bucket{k_bucket(4)}"
+    assert (
+        abs(
+            float(model.temperature[0, k_bucket(4)]) - result["fitted_temperature"][key]
+        )
+        < 1e-9
+    )
+    loaded, boundaries = load_temperatures(sidecar)
+    assert loaded[(0, k_bucket(4))] == result["fitted_temperature"][key]
+    assert boundaries == tuple(cfg.k_buckets)
