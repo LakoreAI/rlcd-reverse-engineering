@@ -17,6 +17,7 @@ from pathlib import Path
 
 import torch
 
+from src.config import QTYPES
 from src.modules.model import DecisionModel
 from src.utils.io_utils import save_json
 
@@ -78,6 +79,7 @@ def collect_rows(model: DecisionModel, loader, device: torch.device) -> list[dic
         marker_mask_cpu = marker_mask.cpu()
         qtype_cpu = qtype.cpu()
         target = batch["target"]
+        label = batch.get("label")
 
         for i in range(logits.shape[0]):
             k = int(marker_mask_cpu[i].sum())
@@ -87,19 +89,41 @@ def collect_rows(model: DecisionModel, loader, device: torch.device) -> list[dic
                     "target": target[i, :k],
                     "qtype": int(qtype_cpu[i]),
                     "k": k,
+                    "label": int(label[i]) if label is not None else -1,
                 }
             )
     return rows
 
 
+def _gold_index(row: dict) -> int:
+    """Gold option index: the hard `label` when the row has one (what Laya's
+    own evaluation scores against), else the soft target's argmax."""
+    label = row.get("label", -1)
+    return label if 0 <= label < row["k"] else int(row["target"].argmax())
+
+
 def _rows_to_metrics(rows: list[dict], n_bins: int = 15) -> dict[str, object]:
-    confidences, corrects, briers, nlls = [], [], [], []
+    confidences, corrects, briers, nlls, soft_accs, score_abs_errs, target_maxes = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     for row in rows:
         p = torch.softmax(row["logits"], dim=-1)
+        t = row["target"]
         confidences.append(float(p.max()))
-        corrects.append(int(p.argmax() == row["target"].argmax()))
-        briers.append(float(((p - row["target"]) ** 2).sum()))
-        nlls.append(float(-(row["target"] * p.clamp_min(1e-12).log()).sum()))
+        corrects.append(int(int(p.argmax()) == _gold_index(row)))
+        briers.append(float(((p - t) ** 2).sum()))
+        nlls.append(float(-(t * p.clamp_min(1e-12).log()).sum()))
+        soft_accs.append(float((p * t).sum()))
+        target_maxes.append(float(t.max()))
+        if row["qtype"] == QTYPES["score"]:
+            levels = torch.arange(row["k"], dtype=p.dtype)
+            score_abs_errs.append(float(((p - t) * levels).sum().abs()))
 
     n = len(rows)
     return {
@@ -109,8 +133,27 @@ def _rows_to_metrics(rows: list[dict], n_bins: int = 15) -> dict[str, object]:
         "brier": sum(briers) / n if n else float("nan"),
         "nll": sum(nlls) / n if n else float("nan"),
         "accuracy": sum(corrects) / n if n else float("nan"),
+        "soft_accuracy": sum(soft_accs) / n if n else float("nan"),
+        "mean_confidence": sum(confidences) / n if n else float("nan"),
+        # Sharpness relative to the soft targets (the §V claim's reference
+        # point): > 0 means the model's max-prob exceeds the target's.
+        "mean_target_max": sum(target_maxes) / n if n else float("nan"),
+        "score_mae": (
+            sum(score_abs_errs) / len(score_abs_errs) if score_abs_errs else None
+        ),
         "n": n,
     }
+
+
+def _metrics_with_breakdown(rows: list[dict], n_bins: int = 15) -> dict[str, object]:
+    """Overall metrics plus the same dict per question type under `by_type`."""
+    result = _rows_to_metrics(rows, n_bins)
+    names = {v: k for k, v in QTYPES.items()}
+    result["by_type"] = {
+        names[qt]: _rows_to_metrics([r for r in rows if r["qtype"] == qt], n_bins)
+        for qt in sorted({r["qtype"] for r in rows})
+    }
+    return result
 
 
 def raw_metrics(rows: list[dict], n_bins: int = 15) -> dict[str, object]:
@@ -167,18 +210,24 @@ def _pad_1d(x: torch.Tensor, length: int, value: float) -> torch.Tensor:
     return torch.cat([x, pad])
 
 
+def _scale_rows(
+    rows: list[dict], temperatures: dict[tuple[int, int], float]
+) -> list[dict]:
+    scaled_rows = []
+    for row in rows:
+        key = (row["qtype"], k_bucket(row["k"]))
+        t = temperatures.get(key, 1.0)
+        scaled_rows.append({**row, "logits": row["logits"] / t})
+    return scaled_rows
+
+
 def apply_temperature(
     rows: list[dict], temperatures: dict[tuple[int, int], float], n_bins: int = 15
 ) -> dict[str, object]:
     """Re-score `rows` with `logits / T[qtype, k_bucket]` and report the
     same metric dict as `raw_metrics`.
     """
-    scaled_rows = []
-    for row in rows:
-        key = (row["qtype"], k_bucket(row["k"]))
-        t = temperatures.get(key, 1.0)
-        scaled_rows.append({**row, "logits": row["logits"] / t})
-    return _rows_to_metrics(scaled_rows, n_bins)
+    return _rows_to_metrics(_scale_rows(rows, temperatures), n_bins)
 
 
 @torch.no_grad()
@@ -213,8 +262,10 @@ def evaluate(
 
     temperatures = fit_temperatures(calib_rows)
     result = {
-        "raw": raw_metrics(test_rows),
-        "post_temperature": apply_temperature(test_rows, temperatures),
+        "raw": _metrics_with_breakdown(test_rows),
+        "post_temperature": _metrics_with_breakdown(
+            _scale_rows(test_rows, temperatures)
+        ),
         "fitted_temperature": {
             f"type{k[0]}_bucket{k[1]}": v for k, v in temperatures.items()
         },

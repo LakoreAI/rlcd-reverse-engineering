@@ -23,8 +23,10 @@ def proper_reward(
     w_rps: float = 1.0,
 ) -> torch.Tensor:
     """log score + w_sph * spherical score - w_rps * RPS (RPS only for
-    score-type questions). `w_sph=0.5` matches Laya's actual default in
-    `laya/common.py::proper_reward`, verified by reading that file directly.
+    score-type questions). `w_sph=0.5` matches the default in
+    `laya/common.py::proper_reward`; note Laya's typed-decisions fine-tune
+    notebook (`laya_finetune_typed_decisions_2xT4_kaggle.ipynb`) overrides it
+    with `w_sph=0.75`, which is what the E2 configs use.
 
     ... denotes arbitrary leading dims (e.g. a noise-sample axis `G`),
     broadcast the same way across q/t/qtype/mask.
@@ -83,8 +85,12 @@ def rlcd_loss(
     with torch.no_grad():
         r = proper_reward(q, target.unsqueeze(0), qtype, mask_bool, w_sph, w_rps)
         # target.unsqueeze(0): (1, B, K) broadcasts against q (G, B, K) -> r: (G, B)
-        adv = (r - r.mean(0, keepdim=True)) / (r.std() + 1e-6)
+        adv = r - r.mean(0, keepdim=True)
         # r.mean(0, keepdim=True): (1, B); adv: (G, B) — group-baselined advantage
+        adv = adv / (adv.std() + 1e-6)
+        # Normalised by the std of the *centred* advantages, as Laya's typed-
+        # decisions fine-tune notebook does — not by r.std(), which also counts
+        # between-row reward spread and so shrinks the RL term.
 
     logp = -(((zs - z.unsqueeze(0)) ** 2) * mask_f).sum(-1) / (2 * sigma**2)
     # zs (G, B, K) - z.unsqueeze(0) (1, B, K) -> (G, B, K) -> sum(-1) -> logp: (G, B)

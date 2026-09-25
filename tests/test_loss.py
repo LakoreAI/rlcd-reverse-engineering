@@ -77,3 +77,19 @@ def test_probabilities_and_predict_ignore_padding():
     probs = probabilities(logits)
     assert probs[0, -1] < 1e-6
     assert int(predict(logits)[0]) == 0
+
+
+def test_rl_advantage_normalised_by_centred_std():
+    # Rows with very different reward levels: dividing by the raw-reward std
+    # (between-row spread included) would shrink the RL gradient; Laya
+    # normalises the centred advantages, so the RL gradient stays O(1/sigma).
+    torch.manual_seed(0)
+    z = torch.tensor([[8.0, -8.0], [0.0, 0.0]], requires_grad=True)
+    target = torch.tensor([[0.0, 1.0], [0.5, 0.5]])
+    qtype = torch.zeros(2, dtype=torch.long)
+    mask = torch.ones(2, 2, dtype=torch.bool)
+    loss, _ = rlcd_loss(
+        z, target, qtype, mask, sigma=0.5, num_noise_samples=64, w_rl=1.0, w_ce=0.0
+    )
+    loss.backward()
+    assert z.grad.abs().max() > 0.1

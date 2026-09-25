@@ -1,0 +1,209 @@
+% ---------------------------------------------------------------- web sources
+@misc{typesafe_blog,
+  author       = {{TypeSafe AI}},
+  title        = {Introducing System One Models and {Jev}},
+  howpublished = {\url{https://typesafe.ai/blog/introducing-system-one-models-and-jev}},
+  year         = {2026},
+  note         = {Accessed 2026-09-24}
+}
+
+@misc{typesafe_docs,
+  author       = {{TypeSafe AI}},
+  title        = {{TypeSafe} documentation: primer, confidence, and jaggedness},
+  howpublished = {\url{https://docs.typesafe.ai/}},
+  year         = {2026},
+  note         = {Accessed 2026-09-24}
+}
+
+@misc{rlcd_explained,
+  author       = {{System One Models}},
+  title        = {{RLCD} explained},
+  howpublished = {\url{https://systemonemodels.org/guides/rlcd-explained/}},
+  year         = {2026},
+  note         = {Accessed 2026-09-24}
+}
+
+@misc{techcrunch_jev,
+  author       = {{TechCrunch}},
+  title        = {A new kind of {AI} model from a {ChatGPT} inventor is thrilling developers},
+  howpublished = {\url{https://techcrunch.com/2026/09/18/a-new-kind-of-ai-model-from-a-chatgpt-inventor-is-thrilling-developers/}},
+  year         = {2026},
+  note         = {Accessed 2026-09-24}
+}
+
+@misc{laya_repo,
+  author       = {{NandhaKishorM} and {ConvAI Innovations}},
+  title        = {Laya: an open typed-decision model trained with {RLCD}},
+  howpublished = {\url{https://github.com/NandhaKishorM/laya}},
+  year         = {2026},
+  note         = {Apache-2.0; \texttt{laya/common.py} and the typed-decisions fine-tune notebook. Accessed 2026-09-24}
+}
+
+@misc{laya_issue186,
+  author       = {{Laya contributors}},
+  title        = {Issue \#186: temperatures fitted on training items},
+  howpublished = {\url{https://github.com/NandhaKishorM/laya/issues/186}},
+  year         = {2026},
+  note         = {Accessed 2026-09-24}
+}
+
+@misc{laya_hf,
+  author       = {{ConvAI Innovations}},
+  title        = {Laya model checkpoints},
+  howpublished = {\url{https://huggingface.co/convaiinnovations/laya}},
+  year         = {2026},
+  note         = {\texttt{convaiinnovations/laya}, \texttt{laya-typed-decisions}; Hugging Face. Accessed 2026-09-25}
+}
+
+@misc{typed_decisions_ds,
+  author       = {{LocalLLaMA}},
+  title        = {typed-decisions},
+  howpublished = {\url{https://huggingface.co/datasets/LocalLLaMA/typed-decisions}},
+  year         = {2026},
+  note         = {Apache-2.0 dataset, Hugging Face. Accessed 2026-09-24}
+}
+
+@misc{this_repo,
+  author       = {Le Duc Minh},
+  title        = {rlcd-reverse-engineering: code, configs and result files for this report},
+  howpublished = {\url{https://github.com/LakoreAI/rlcd-reverse-engineering}},
+  year         = {2026}
+}
+
+% ------------------------------------------------------------ calibration
+@inproceedings{guo2017calibration,
+  author    = {Chuan Guo and Geoff Pleiss and Yu Sun and Kilian Q. Weinberger},
+  title     = {On Calibration of Modern Neural Networks},
+  booktitle = {Proc. 34th Int. Conf. Machine Learning (ICML)},
+  pages     = {1321--1330},
+  year      = {2017}
+}
+
+@inproceedings{naeini2015ece,
+  author    = {Mahdi Pakdaman Naeini and Gregory F. Cooper and Milos Hauskrecht},
+  title     = {Obtaining Well Calibrated Probabilities Using {Bayesian} Binning},
+  booktitle = {Proc. 29th AAAI Conf. Artificial Intelligence},
+  pages     = {2901--2907},
+  year      = {2015}
+}
+
+@article{gneiting2007scoring,
+  author  = {Tilmann Gneiting and Adrian E. Raftery},
+  title   = {Strictly Proper Scoring Rules, Prediction, and Estimation},
+  journal = {Journal of the American Statistical Association},
+  volume  = {102},
+  number  = {477},
+  pages   = {359--378},
+  year    = {2007}
+}
+
+@article{brier1950,
+  author  = {Glenn W. Brier},
+  title   = {Verification of Forecasts Expressed in Terms of Probability},
+  journal = {Monthly Weather Review},
+  volume  = {78},
+  number  = {1},
+  pages   = {1--3},
+  year    = {1950}
+}
+
+@article{epstein1969rps,
+  author  = {Edward S. Epstein},
+  title   = {A Scoring System for Probability Forecasts of Ranked Categories},
+  journal = {Journal of Applied Meteorology},
+  volume  = {8},
+  number  = {6},
+  pages   = {985--987},
+  year    = {1969}
+}
+
+@inproceedings{nie2020chaosnli,
+  author    = {Yixin Nie and Xiang Zhou and Mohit Bansal},
+  title     = {What Can We Learn from Collective Human Opinions on Natural Language Inference Data?},
+  booktitle = {Proc. Conf. Empirical Methods in Natural Language Processing (EMNLP)},
+  pages     = {9131--9143},
+  year      = {2020}
+}
+
+@article{hinton2015distilling,
+  author  = {Geoffrey Hinton and Oriol Vinyals and Jeff Dean},
+  title   = {Distilling the Knowledge in a Neural Network},
+  journal = {arXiv preprint arXiv:1503.02531},
+  year    = {2015}
+}
+
+% ------------------------------------------------ gradient estimation / RL
+@article{williams1992reinforce,
+  author  = {Ronald J. Williams},
+  title   = {Simple Statistical Gradient-Following Algorithms for Connectionist Reinforcement Learning},
+  journal = {Machine Learning},
+  volume  = {8},
+  number  = {3--4},
+  pages   = {229--256},
+  year    = {1992}
+}
+
+@article{salimans2017es,
+  author  = {Tim Salimans and Jonathan Ho and Xi Chen and Szymon Sidor and Ilya Sutskever},
+  title   = {Evolution Strategies as a Scalable Alternative to Reinforcement Learning},
+  journal = {arXiv preprint arXiv:1703.03864},
+  year    = {2017}
+}
+
+@article{nesterov2017random,
+  author  = {Yurii Nesterov and Vladimir Spokoiny},
+  title   = {Random Gradient-Free Minimization of Convex Functions},
+  journal = {Foundations of Computational Mathematics},
+  volume  = {17},
+  number  = {2},
+  pages   = {527--566},
+  year    = {2017}
+}
+
+@article{mohamed2020mcgrad,
+  author  = {Shakir Mohamed and Mihaela Rosca and Michael Figurnov and Andriy Mnih},
+  title   = {{Monte Carlo} Gradient Estimation in Machine Learning},
+  journal = {Journal of Machine Learning Research},
+  volume  = {21},
+  number  = {132},
+  pages   = {1--62},
+  year    = {2020}
+}
+
+@inproceedings{christiano2017rlhf,
+  author    = {Paul F. Christiano and Jan Leike and Tom B. Brown and Miljan Martic and Shane Legg and Dario Amodei},
+  title     = {Deep Reinforcement Learning from Human Preferences},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {30},
+  year      = {2017}
+}
+
+@inproceedings{ouyang2022instructgpt,
+  author    = {Long Ouyang and Jeff Wu and Xu Jiang and Diogo Almeida and Carroll L. Wainwright and Pamela Mishkin and Chong Zhang and Sandhini Agarwal and Katarina Slama and Alex Ray and others},
+  title     = {Training Language Models to Follow Instructions with Human Feedback},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {35},
+  year      = {2022}
+}
+
+@article{shao2024grpo,
+  author  = {Zhihong Shao and Peiyi Wang and Qihao Zhu and Runxin Xu and Junxiao Song and Mingchuan Zhang and Y. K. Li and Y. Wu and Daya Guo},
+  title   = {{DeepSeekMath}: Pushing the Limits of Mathematical Reasoning in Open Language Models},
+  journal = {arXiv preprint arXiv:2402.03300},
+  year    = {2024}
+}
+
+@article{lambert2024tulu3,
+  author  = {Nathan Lambert and Jacob Morrison and Valentina Pyatkin and Shengyi Huang and Hamish Ivison and Faeze Brahman and others},
+  title   = {{T\"ulu} 3: Pushing Frontiers in Open Language Model Post-Training},
+  journal = {arXiv preprint arXiv:2411.15124},
+  year    = {2024}
+}
+
+% ------------------------------------------------------------- backbone
+@article{warner2024modernbert,
+  author  = {Benjamin Warner and Antoine Chaffin and Benjamin Clavi\'e and Orion Weller and Oskar Hallstr\"om and Said Taghadouini and others},
+  title   = {Smarter, Better, Faster, Longer: A Modern Bidirectional Encoder for Fast, Memory Efficient, and Long Context Finetuning and Inference},
+  journal = {arXiv preprint arXiv:2412.13663},
+  year    = {2024}
+}

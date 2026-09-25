@@ -37,9 +37,17 @@ class TrainingConfig:
     accum_steps: int = 1
     num_workers: int = 0
     pin_memory: bool = False
+    # Mixed precision. "bf16" (Ampere+ CUDA, or Apple MPS) needs no loss
+    # scaling; "fp16" (e.g. T4) uses a GradScaler, CUDA only. Ignored on CPU.
     amp: bool = False
+    amp_dtype: str = "bf16"
+    gradient_checkpointing: bool = False
     lr: float = 2e-5
+    # Separate LR for the non-encoder params (head/type_emb/scorer); None
+    # uses `lr` for everything. Laya's notebook: 2.5e-5 encoder, 1e-4 head.
+    lr_head: Optional[float] = None
     weight_decay: float = 0.01
+    grad_clip: Optional[float] = None
     log_every: int = 10
     eval_every: int = 1
     ckpt_every: int = 1
@@ -60,6 +68,18 @@ class TrainingConfig:
     # Optional DecisionModelConfig architecture overrides, e.g.
     # {"encoder_name": "google/bert_uncased_L-2_H-128_A-2", "head_layers": 1}.
     arch: Optional[dict] = None
+
+    # Initialise the full DecisionModel (encoder + head + scorer) from a Laya
+    # checkpoint instead of the bare pretrained encoder: an HF repo id
+    # (e.g. "convaiinnovations/laya", reads its `model.safetensors`) or a
+    # local .safetensors path. Laya's `act_head` and scalar `temperature`
+    # are dropped (see src/modules/model.py).
+    init_from: Optional[str] = None
+
+    # E3: every `log_every` steps, log cosine(∇RL, ∇CE) and ||∇RL||/||∇CE||
+    # taken w.r.t. the logits (not the parameters — logit-level is free,
+    # parameter-level would cost two extra backward passes).
+    log_grad_diagnostics: bool = False
 
     # --- callbacks ---
     # None (or {"type": "none"}) disables LR scheduling. See

@@ -136,7 +136,7 @@ def test_collect_rows_and_eval_per_epoch(dummy_encoder):
         assert row["logits"].shape == (3,)
 
     extra = eval_per_epoch(model, loader, torch.device("cpu"))
-    assert set(extra) == {"raw_ece", "raw_brier", "raw_nll", "raw_accuracy", "raw_n"}
+    assert {"raw_ece", "raw_brier", "raw_nll", "raw_accuracy", "raw_n"} <= set(extra)
 
 
 def test_eval_per_epoch_empty_loader_returns_empty_dict(dummy_encoder):
@@ -159,3 +159,43 @@ def test_evaluate_end_to_end_produces_report(dummy_encoder):
     report = format_report(result)
     assert "raw:" in report
     assert "postT:" in report
+
+
+def test_accuracy_scores_against_hard_label_when_present():
+    # logits argmax is option 0; soft target argmax is option 0 too, but the
+    # gold hard label is option 1 -> incorrect, as in Laya's own evaluation.
+    row = {
+        "logits": torch.tensor([2.0, 0.0]),
+        "target": torch.tensor([0.6, 0.4]),
+        "qtype": 0,
+        "k": 2,
+        "label": 1,
+    }
+    assert raw_metrics([row])["accuracy"] == 0.0
+    assert raw_metrics([{**row, "label": -1}])["accuracy"] == 1.0
+
+
+def test_score_mae_only_for_score_rows():
+    score_row = {
+        "logits": torch.tensor([10.0, -10.0, -10.0]),
+        "target": torch.tensor([0.0, 0.0, 1.0]),
+        "qtype": 1,
+        "k": 3,
+        "label": 2,
+    }
+    result = raw_metrics([score_row])
+    assert abs(result["score_mae"] - 2.0) < 1e-3
+    assert raw_metrics([make_row(0, 3, seed=0)])["score_mae"] is None
+
+
+def test_evaluate_reports_by_type_breakdown(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    result = evaluate(
+        model,
+        make_loader(8, qtype=0, k=3),
+        make_loader(8, qtype=2, k=2),
+        torch.device("cpu"),
+    )
+    assert set(result["raw"]["by_type"]) == {"noul"}
+    assert result["raw"]["by_type"]["noul"]["n"] == 8

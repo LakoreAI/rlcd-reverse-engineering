@@ -73,6 +73,21 @@ def target_vector(question: dict, gold_entry: dict) -> list[float]:
     return [float(probs[k]) for k in option_keys(question)]
 
 
+def label_index(question: dict, gold_entry: dict) -> int:
+    """Index of the gold `label` among `option_keys`, or -1 if absent.
+
+    Laya's evaluation scores accuracy/ECE against this hard label, not the
+    soft target's argmax (they disagree on ~1% of `LocalLLaMA/typed-decisions`
+    rows), so eval uses it when present.
+    """
+    label = gold_entry.get("label")
+    if label is None:
+        return -1
+    keys = [k.lower() for k in option_keys(question)]
+    label = str(label).lower()
+    return keys.index(label) if label in keys else -1
+
+
 def build_sequence(
     tokenizer, state: str, question: dict, max_len: int = 512, head_max_len: int = 192
 ) -> tuple[list[int], list[int]]:
@@ -139,8 +154,8 @@ class TypedDecisionDataset(Dataset):
     `state`, `questions`, `gold`, each a JSON string) into one row per
     (case, question).
 
-    `__getitem__` returns `{"ids", "markers", "target", "qtype"}` — variable
-    length per row; use `collate_fn` to batch.
+    `__getitem__` returns `{"ids", "markers", "target", "qtype", "label"}` —
+    variable length per row; use `collate_fn` to batch.
     """
 
     def __init__(
@@ -170,6 +185,7 @@ class TypedDecisionDataset(Dataset):
             "markers": markers,
             "target": target_vector(question, gold_entry),
             "qtype": QTYPES[question["type"]],
+            "label": label_index(question, gold_entry),
         }
 
 
@@ -180,7 +196,7 @@ def collate_fn(
     length / option count. Returns tensors keyed `ids`, `attention_mask`,
     `marker_pos`, `marker_mask`, `target`, `qtype` — the exact kwargs
     `src.modules.model.DecisionModel.forward` and `src.modules.loss.rlcd_loss`
-    expect.
+    expect — plus `label` (gold option index, -1 when a row has none).
     """
     batch_size = len(batch)
     max_len = max(len(row["ids"]) for row in batch)
@@ -192,6 +208,7 @@ def collate_fn(
     marker_mask = torch.zeros((batch_size, max_opts), dtype=torch.bool)
     target = torch.zeros((batch_size, max_opts), dtype=torch.float32)
     qtype = torch.zeros((batch_size,), dtype=torch.long)
+    label = torch.full((batch_size,), -1, dtype=torch.long)
 
     for i, row in enumerate(batch):
         seq_len = len(row["ids"])
@@ -202,6 +219,7 @@ def collate_fn(
         marker_mask[i, :num_opts] = True
         target[i, :num_opts] = torch.as_tensor(row["target"], dtype=torch.float32)
         qtype[i] = row["qtype"]
+        label[i] = row.get("label", -1)
 
     return {
         "ids": ids,
@@ -210,6 +228,7 @@ def collate_fn(
         "marker_mask": marker_mask,
         "target": target,
         "qtype": qtype,
+        "label": label,
     }
 
 

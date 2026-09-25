@@ -8,6 +8,7 @@ from src.data import (
     TypedDecisionDataset,
     build_sequence,
     collate_fn,
+    label_index,
     option_keys,
     render_options,
     split_train_calib,
@@ -129,7 +130,7 @@ def test_typed_decision_dataset_flattens_one_row_per_question(dummy_tokenizer):
     assert len(ds) == 2
 
     row0 = ds[0]
-    assert set(row0) == {"ids", "markers", "target", "qtype"}
+    assert set(row0) == {"ids", "markers", "target", "qtype", "label"}
     assert row0["qtype"] == QTYPES["choice"]
     assert len(row0["target"]) == 2
 
@@ -188,3 +189,24 @@ def test_split_train_calib_disabled_returns_none():
     train, calib = split_train_calib(hf_ds, calib_fraction=0.0, seed=0)
     assert calib is None
     assert len(train) == 1
+
+
+def test_label_index_matches_option_keys():
+    assert label_index(CHOICE_Q, {"label": "go"}) == 1
+    assert label_index(SCORE_Q, {"label": "2"}) == 2
+    assert label_index(NOUL_Q, {"label": "True"}) == 1
+    assert label_index(CHOICE_Q, {}) == -1
+    assert label_index(CHOICE_Q, {"label": "unknown"}) == -1
+
+
+def test_collate_fn_carries_labels(dummy_tokenizer):
+    case = make_hf_case(
+        "c0",
+        {"q1": CHOICE_Q},
+        {"q1": {"label": "go", "probabilities": {"stop": 0.4, "go": 0.6}}},
+    )
+    ds = TypedDecisionDataset(
+        HFDataset.from_list([case]), dummy_tokenizer, max_len=64, head_max_len=32
+    )
+    batch = collate_fn([ds[0]], pad_token_id=dummy_tokenizer.pad_token_id)
+    assert batch["label"].tolist() == [1]

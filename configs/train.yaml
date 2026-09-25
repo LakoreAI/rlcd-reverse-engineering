@@ -49,7 +49,7 @@ arch: null
 # --- callbacks ---
 lr_scheduler:
   type: cosine
-  t_max: 10
+  t_max: auto  # total optimizer steps (the scheduler steps per optimizer step)
   eta_min: 0.0000001
   start_epoch: 0
 early_stopping:

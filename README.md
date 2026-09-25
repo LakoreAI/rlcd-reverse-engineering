@@ -22,7 +22,10 @@ Start here:
   scaffold to a submitted report.
 - **[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md)** — the runbook/log for each
   gated experiment (hypothesis, config, command, result, decision).
-- **[`docs/analysis/`](docs/analysis/)** — standalone analytical notes (e.g.
+- **[`docs/reports/`](docs/reports/)** — dated run/compute reports
+  (`docs/reports/YYYY-MM-DD/<topic>.md`), e.g. the E2 results.
+- **[`docs/analysis/`](docs/analysis/)** — dated analytical notes
+  (`docs/analysis/YYYY-MM-DD/<topic>.md`) (e.g.
   the noise-smoothing over-confidence proof sketch) that feed the report.
 - **[`experiments/`](experiments/)** — self-contained numerical scripts (E1's
   toy bias check) that don't need the full `src/` training pipeline.
