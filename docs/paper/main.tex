@@ -375,6 +375,37 @@ grows.}
 \label{fig:e1}
 \end{figure}
 
+\subsection{Direct check of the noise-averaging identity}
+\label{sec:noiseavg}
+
+E1 maximised the smoothed objective in isolation; the trained checkpoints let
+us check \eqref{eq:stationary} end to end. For the fixed-$\sigma$ models we
+compare, over the test set, the noise-free $\softmax(z^\star)$ with a
+128-sample average $E_\epsilon[\softmax(z^\star+\epsilon)]$
+(Table~\ref{tab:noiseavg}). At $\sigma{=}2$ the noise-averaged prediction lands
+on the target (sharpness gap $-0.006$) while the noise-free prediction --- the
+one inference reports --- is over-sharp by $+0.108$; averaging moves 68\% of
+rows toward the target and $\mathrm{KL}(t\|p)$ falls from $0.166$ to $0.100$.
+At $\sigma{=}1$ the same effect is smaller ($+0.085\to+0.033$), as the
+$O(\sigma^2)$ remark predicts.
+
+\begin{table}[t]
+\caption{Noise-averaging check on the test set. ``avg'' is the 128-sample
+$E_\epsilon[\softmax(z^\star+\epsilon)]$; over-sharpness is
+$\overline{\max p}-\overline{\max t}$ (lower is better).}
+\label{tab:noiseavg}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+$\sigma$ & $\overline{\max p}$ & $\overline{\max \bar p}$ & $\overline{\max t}$ & gap$_0$ & gap$_\text{avg}$ & KL$_0$ & KL$_\text{avg}$ & moved \\
+\midrule
+\input{tables/noise_avg.tex}
+\end{tabular}}
+\end{table}
+
 \subsection{E2: Loss ablation on real data}
 \label{sec:e2}
 
@@ -508,7 +539,10 @@ $0.7828\pm0.004$ to $0.7885$, and lowers Brier from $0.0515$ to $0.0495$ and
 NLL from $0.8612$ to $0.8581$ --- more than any loss term or reward weight
 below. This is the option-token starvation the model card warns about: this
 port shared a smaller option budget (192) than the checkpoint was built with
-(256), so questions with many options lost tokens.
+(256), so questions with many options lost tokens. Continuing from the
+already fine-tuned \texttt{laya-typed-decisions} checkpoint at the same 1024
+budget gives the same result ($0.7895$), so the gain is the budget, not the
+starting point.
 
 Reward weight trades calibration for nothing. At fixed $\sigma=1$, scaling the
 RL weight while holding CE fixed leaves accuracy flat but worsens every proper

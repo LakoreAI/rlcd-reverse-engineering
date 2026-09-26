@@ -23,6 +23,7 @@ RUNS = ROOT / "results" / "e2_vm" / "results"
 ORDER = {
     "e2_ce_only": r"CE-only ($w_\mathrm{rl}{=}0$)",
     "e2_ce_only_1024": r"CE-only, 1024/256",
+    "e2_ce_only_typed_init": r"CE-only, 1024/256, typed-init",
     "e2_laya_rlce": r"RL+CE, Laya",
     "e2_rl_only": r"RL-only ($w_\mathrm{ce}{=}0$)",
     "e2_rlce_sigma0p25_fixed": r"$\sigma{=}0.25$",
@@ -108,11 +109,25 @@ def emit(order, cols, path):
     print("wrote", path, "->", len(lines), "rows")
 
 
+def emit_noise():
+    rows = []
+    for sigma in (1, 2):
+        d = json.load(open(RUNS / f"noise_avg_sigma{sigma}.json"))
+        rows.append(
+            f"${sigma}$ & {d['sharp0']:.3f} & {d['sharpbar']:.3f} & "
+            f"{d['sharpt']:.3f} & ${d['gap0']:+.3f}$ & ${d['gapbar']:+.3f}$ & "
+            f"{d['kl0']:.3f} & {d['klbar']:.3f} & {d['moved']:.2f} \\\\"
+        )
+    (OUT / "noise_avg.tex").write_text("\n".join(rows) + "\n\\bottomrule\n")
+    print("wrote noise_avg.tex ->", len(rows), "rows")
+
+
 if __name__ == "__main__":
     emit(
         [
             "e2_ce_only",
             "e2_ce_only_1024",
+            "e2_ce_only_typed_init",
             "e2_laya_rlce",
             "e2_rl_only",
             "e2_rlce_sigma0p5_fixed",
@@ -159,3 +174,4 @@ if __name__ == "__main__":
         ["gap", "brier", "nll", "Tn", "Tc", "Ts", "acc"],
         "e4_reward.tex",
     )
+    emit_noise()
