@@ -1,8 +1,7 @@
 # Sev
 
 **Sev** is a reproduction and clean-room analysis of RLCD, the training method
-behind typed-decision models. It ships the training and evaluation code, every
-config and per-run result file, the IEEE report, and the trained checkpoints.
+behind typed-decision models.
 
 The report's finding: Laya's RL term is an evolution-strategies estimate of the
 gradient of a noise-smoothed proper scoring rule. As the noise vanishes it
@@ -61,8 +60,7 @@ template (config-driven training loop, callbacks, evaluation, tests). Its own
 keep the checkpoint schema, CLI, and callbacks working — is exactly what has
 been done: `src/` now implements the typed-decision (RLCD/Laya-style) model
 needed for the E2 loss ablation directly in place, not as
-a parallel package. See [Repository layout](#repository-layout) below for
-what each file holds now.
+a parallel package.
 
 ## Contents
 
