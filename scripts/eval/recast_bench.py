@@ -157,16 +157,25 @@ def main() -> None:
     ap.add_argument("--split", default=None)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--batch_size", type=int, default=8)
-    ap.add_argument("--max_len", type=int, default=512)
-    ap.add_argument("--head_max_len", type=int, default=256)
+    ap.add_argument("--max_len", type=int, default=None)
+    ap.add_argument("--head_max_len", type=int, default=None)
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
     spec = TASKS[args.task]
     device = detect_device()
     model, cfg, tokenizer = load_any_model(
-        args.model, device, args.max_len, args.head_max_len
+        args.model,
+        device,
+        args.max_len or 512,
+        args.head_max_len or 256,
     )
+    # The sequence budget is a build-time parameter, not a model parameter, so
+    # it can be overridden at inference to probe option-token starvation.
+    if args.max_len:
+        cfg.max_len = args.max_len
+    if args.head_max_len:
+        cfg.head_max_len = args.head_max_len
     model.eval()
 
     ds = load_dataset(spec["path"], split=args.split or spec["split"])
