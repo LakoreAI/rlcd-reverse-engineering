@@ -599,6 +599,21 @@ $1/\sigma$; (b)~alignment with the CE gradient falls as $\sigma$ grows.}
 \label{fig:grad}
 \end{figure}
 
+\subsection{E5: Consistency probes}
+\label{sec:e5}
+
+On the $\sigma{=}2$ checkpoint we perturbed 500 test questions and re-scored
+them. Option order is mostly handled: reversing the options changes the chosen
+option on 6.6\% of rows (choice 2.0\%, score 14.0\%, noul 1.0\%; the score
+figure is partly definitional, since reversing ordinal levels is not an
+invariance). Appending a neutral suffix ``(restated)'' to every option changes
+2.0\% of picks. Appending an unrelated passage to the state changes 13.4\% of
+picks, the sensitivity to irrelevant context TypeSafe documents for
+Jev~\cite{typesafe_docs}. A rough negation probe (negate the instruction and
+swap the true/false wording) leaves a mean
+$|p(\text{true})-p_{\text{neg}}(\text{false})|$ of $0.53$: the two wordings are
+far from mutually exclusive.
+
 \subsection{Reproducibility}
 A second run of RL+CE seed 42 matched the first closely (NLL 0.864 / 0.867,
 accuracy 0.772 / 0.772), though not bitwise. An earlier seed-42 run is a
