@@ -1,3 +1,4 @@
+# Variance/capacity probe: same 1024/256 budget, one extra head layer.
 # Accuracy experiment: the laya-typed-decisions model card states context
 # 1024 and warns that a 256-token option budget is shared across options;
 # this port was built at 512/192. Train CE-only with the larger budget to
@@ -21,7 +22,7 @@ seed: 42
 
 ckpt_dir: checkpoints
 result_dir: results
-run_name: e2_ce_only_1024_seed42
+run_name: e2_ce_only_1024_3l_seed42
 
 epochs: 4
 batch_size: 16
@@ -48,7 +49,7 @@ anneal_sigma: true
 reward_w_spherical: 0.75
 reward_w_rps: 1.0
 
-arch: {encoder_name: answerdotai/ModernBERT-large, head_layers: 2, max_len: 1024, head_max_len: 256}
+arch: {encoder_name: answerdotai/ModernBERT-large, head_layers: 3, max_len: 1024, head_max_len: 256}
 init_from: convaiinnovations/laya
 log_grad_diagnostics: true
 
