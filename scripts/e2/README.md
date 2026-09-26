@@ -1,6 +1,6 @@
 # E2 on a rented GPU (minimum budget)
 
-Runs the two E2 configs that test prediction 1 in `docs/PLAN.md` §5 —
+Runs the two E2 configs that test prediction 1 in `the project plan` §5 —
 **CE-only raw ECE ≤ RL+CE raw ECE** — on one rented CUDA GPU, logging E3's
 gradient diagnostics along the way. Nothing here needs editing on the
 remote machine.
@@ -91,7 +91,7 @@ figures regenerate without ever renting a GPU.
 
 ## Plan for the next rented run (Runpod)
 
-To finish §9.4 of `docs/TODO.md` — 2 extra seeds each for σ=0.5, σ=2 and
+To finish §9.4 of `the task list` — 2 extra seeds each for σ=0.5, σ=2 and
 RL-only (6 runs), the 3 E4 reward-composition runs, and E5 (inference-only)
 — on Runpod instead of ckey.vn.
 

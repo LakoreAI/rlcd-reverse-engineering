@@ -49,7 +49,7 @@ fitted temperature for the dominant bucket of each type.
 Per-run rows are in `results/e2_summary.json` and in the printout of
 `scripts/e2/summarize.py`.
 
-## Predictions from `docs/PLAN.md` §5
+## Predictions from `the project plan` §5
 
 **Prediction 2 (bias grows with σ): confirmed**, on the metrics that test
 it. As σ goes 0.5 → 1 → 2 (RL+CE, fixed):

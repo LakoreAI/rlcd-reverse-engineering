@@ -8,6 +8,7 @@ IEEE column (3.5 in) with >= 8 pt text.
 """
 
 import json
+import re
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -93,6 +94,19 @@ def fig_e1():
         xs = [r["sigma"] for r in rows]
         ys = [r["sharpness_max_p"] for r in rows]
         ax.plot(xs, ys, color=c, marker=m, ls=ls, label=name)
+    # The noise-averaged prediction E_eps[softmax(z*+eps)] stays on the target
+    # (Eq. 5); only the noise-free softmax(z*) sharpens.
+    base = e1["baseline_replication"]
+    if all("sharpness_max_noise_averaged" in r for r in base):
+        ax.plot(
+            [r["sigma"] for r in base],
+            [r["sharpness_max_noise_averaged"] for r in base],
+            color=BLUE,
+            marker="o",
+            mfc="white",
+            ls=(0, (1, 2)),
+            label=r"log score, $\mathbb{E}[p]$",
+        )
     ax.axhline(0.7, color=INK2, lw=0.8, ls=(0, (2, 2)))
     ax.text(
         1.25, 0.705, r"target $\max_i t_i = 0.7$", fontsize=7, color=INK2, va="bottom"
@@ -105,29 +119,40 @@ def fig_e1():
     plt.close(fig)
 
 
+def _fixed_sigma(per_config):
+    """[(sigma, config_key), ...] for every fixed-sigma RL+CE run present."""
+    found = {}
+    for key in per_config:
+        m = re.match(r"e2_rlce_sigma(\d+(?:p\d+)?)_fixed$", key)
+        if m:
+            found[float(m.group(1).replace("p", "."))] = key
+    return [(s, found[s]) for s in sorted(found)]
+
+
 def fig_ece_crossing():
     ra = json.loads((RES / "e2_row_analysis.json").read_text())["per_config"]
-    sig = [0.5, 1.0, 2.0]
-    keys = ["e2_rlce_sigma0p5_fixed", "e2_rlce_sigma1_fixed", "e2_rlce_sigma2_fixed"]
-    soft = [ra[k]["soft_ece"] for k in keys]
-    hard = [ra[k]["hard_ece"] for k in keys]
+    sweep = _fixed_sigma(ra)
+    sig = [s for s, _ in sweep]
+    soft = [ra[k]["soft_ece"] for _, k in sweep]
+    hard = [ra[k]["hard_ece"] for _, k in sweep]
     fig, ax = plt.subplots(figsize=(COL_W, 2.2))
     ax.plot(sig, soft, color=BLUE, marker="o", label="target-referenced ECE")
     ax.plot(sig, hard, color=ORANGE, marker="s", ls="--", label="hard-label ECE")
     ce = ra["e2_ce_only"]
     ax.axhline(ce["soft_ece"], color=BLUE, lw=0.8, ls=(0, (1, 2)))
     ax.axhline(ce["hard_ece"], color=ORANGE, lw=0.8, ls=(0, (1, 2)))
-    label_end(ax, 2.0, soft[-1], "vs. soft target", dy=0)
-    label_end(ax, 2.0, hard[-1], "vs. hard label", dy=0)
+    label_end(ax, sig[-1], soft[-1], "vs. soft target", dy=0)
+    label_end(ax, sig[-1], hard[-1], "vs. hard label", dy=0)
     ax.text(
-        0.47, ce["soft_ece"] + 0.004, "CE-only", fontsize=7, color=INK2, va="bottom"
+        sig[0], ce["soft_ece"] + 0.004, "CE-only", fontsize=7, color=INK2, va="bottom"
     )
     ax.text(
-        0.47, ce["hard_ece"] + 0.004, "CE-only", fontsize=7, color=INK2, va="bottom"
+        sig[0], ce["hard_ece"] + 0.004, "CE-only", fontsize=7, color=INK2, va="bottom"
     )
-    ax.set_xlim(0.4, 2.6)
-    ax.set_ylim(0, 0.16)
+    ax.set_xlim(min(sig) * 0.8, max(sig) * 1.15)
+    ax.set_ylim(0, max(max(soft), max(hard), ce["hard_ece"]) * 1.15)
     ax.set_xticks(sig)
+    ax.set_xticklabels([f"{s:g}" for s in sig])
     ax.set_xlabel(r"fixed noise scale $\sigma$ (RL+CE)")
     ax.set_ylabel("raw ECE (15 bins)")
     fig.savefig(OUT / "fig_ece_crossing.pdf")
@@ -150,8 +175,10 @@ def _t_by_config():
 
 def fig_temperature():
     g = _t_by_config()
-    sig = [0.5, 1.0, 2.0]
-    keys = ["e2_rlce_sigma0p5_fixed", "e2_rlce_sigma1_fixed", "e2_rlce_sigma2_fixed"]
+    sweep = _fixed_sigma(g)
+    sig = [s for s, _ in sweep]
+    keys = [k for _, k in sweep]
+    ce_x = sig[0] * 0.85
     fig, ax = plt.subplots(figsize=(COL_W, 2.2))
     for tk, name, c, m, ls in [
         ("T[noul/b0]", "noul", ORANGE, "s", "--"),
@@ -160,13 +187,14 @@ def fig_temperature():
     ]:
         ys = [statistics.mean(g[k][tk]) for k in keys]
         ax.plot(sig, ys, color=c, marker=m, ls=ls)
-        label_end(ax, 2.0, ys[-1], name)
+        label_end(ax, sig[-1], ys[-1], name)
         ce = statistics.mean(g["e2_ce_only"][tk])
-        ax.plot([0.42], [ce], marker=m, color=c, mfc="white", ls="none")
-    ax.text(0.42, 1.012, "CE-only", fontsize=6.5, color=INK2, ha="center", va="bottom")
+        ax.plot([ce_x], [ce], marker=m, color=c, mfc="white", ls="none")
+    ax.text(ce_x, 1.012, "CE-only", fontsize=6.5, color=INK2, ha="center", va="bottom")
     ax.axhline(1.0, color=INK2, lw=0.8, ls=(0, (2, 2)))
-    ax.set_xlim(0.3, 2.55)
+    ax.set_xlim(sig[0] * 0.7, sig[-1] * 1.1)
     ax.set_xticks(sig)
+    ax.set_xticklabels([f"{s:g}" for s in sig])
     ax.set_xlabel(r"fixed noise scale $\sigma$ (RL+CE)")
     ax.set_ylabel(r"fitted temperature $T$")
     fig.savefig(OUT / "fig_temperature.pdf")

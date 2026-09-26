@@ -2,14 +2,14 @@
 # (encoder_name, head_layers, ...) lives in src/config.py's
 # DecisionModelConfig and can be overridden per-run with the `arch` block
 # below. This is the "RL+CE (Laya default)" configuration from
-# docs/PLAN.md sec. 5's E2 ablation matrix; ≤5h on a single T4 per the
+# the project plan's E2 ablation matrix; ≤5h on a single T4 per the
 # plan's compute budget (Kaggle free 2xT4).
 
 # --- data ---
 dataset_name: LocalLLaMA/typed-decisions
 dataset_config: all
 # Held out from the train split for raw-ECE validation / temperature
-# fitting; never taken from the test split (docs/PLAN.md sec. 5).
+# fitting; never taken from the test split (the project plan).
 calib_fraction: 0.1
 seed: 42
 
@@ -31,7 +31,7 @@ log_every: 20
 eval_every: 1
 ckpt_every: 1
 
-# --- RLCD loss (docs/PLAN.md sec. 2 / sec. 4) ---
+# --- RLCD loss (the project plan / sec. 4) ---
 # loss = w_rl * L_rl + w_ce * L_ce.
 w_rl: 1.0
 w_ce: 1.0

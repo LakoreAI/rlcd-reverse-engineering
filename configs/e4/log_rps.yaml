@@ -1,7 +1,7 @@
 # E4 — reward composition, "log + RPS": identical to configs/e2/laya_rlce.yaml
 # except the spherical term is off, leaving the log score plus the RPS term
 # for score-type questions (cf. PLAN.md's "RPS reward term"). The full reward
-# is configs/e2/laya_rlce.yaml (0.75 spherical + 1.0 RPS). See docs/PLAN.md
+# is configs/e2/laya_rlce.yaml (0.75 spherical + 1.0 RPS). See the project plan
 # sec. 5, E4.
 
 dataset_name: LocalLLaMA/typed-decisions

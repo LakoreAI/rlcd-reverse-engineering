@@ -22,7 +22,7 @@ verification against Laya's fine-tune notebook".
 | | Advantage |
 |---|---|
 | Laya notebook | `adv = r − mean_G(r)`; `adv = adv / (std(adv) + 1e-6)` |
-| our port (and the condensed version in `docs/PLAN.md` §2) | `adv = (r − mean_G(r)) / (std(r) + 1e-6)` |
+| our port (and the condensed version in `the project plan` §2) | `adv = (r − mean_G(r)) / (std(r) + 1e-6)` |
 
 `std(r)` is taken over all noise samples *and* all rows, so it includes the
 spread of rewards between rows. It is larger than the within-group spread,

@@ -4,7 +4,7 @@ tiny encoder (see `configs/rlcd_smoke.yaml`).
 Runs one epoch, evaluates the best checkpoint, and checks that the full
 pipeline produces finite raw and post-temperature calibration metrics.
 Needs network access (Hugging Face Hub) but no GPU. Not meant to produce
-meaningful calibration numbers — see docs/PLAN.md sec. 5 for the real E2
+meaningful calibration numbers — see the project plan for the real E2
 configs, which need a T4-class GPU and ModernBERT-large.
 
 Usage:

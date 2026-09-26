@@ -2,7 +2,7 @@
 
 Fits per-(type, K-bucket) temperature on a held-out calibration slice of the
 train split, then reports raw and post-temperature ECE/Brier/NLL/accuracy on
-the test split (docs/PLAN.md sec. 5).
+the test split (the project plan).
 
 Usage:
     uv run python scripts/training/evaluate.py \

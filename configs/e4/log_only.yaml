@@ -2,7 +2,7 @@
 # except the spherical and RPS terms are switched off, leaving the RL reward
 # as the plain log score. Together with e4_log_sph / e4_log_rps (and Laya's
 # full reward = configs/e2/laya_rlce.yaml) this isolates how much the extra
-# proper-scoring terms contribute. See docs/PLAN.md sec. 5, E4.
+# proper-scoring terms contribute. See the project plan, E4.
 
 dataset_name: LocalLLaMA/typed-decisions
 dataset_config: all

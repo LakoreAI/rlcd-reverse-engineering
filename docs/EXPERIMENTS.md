@@ -28,7 +28,7 @@ command, result, and decision.
   target `t`, growing with `σ`; the same qualitative bias holds under
   Laya's full reward (log + spherical − RPS) and across a range of `K` and
   target entropies, not just the one hand-picked 3-class example in
-  `docs/PLAN.md` §4.
+  `the project plan` §4.
 - **Config:** none (self-contained script, no YAML) — see script header for
   seeds/steps/batch.
 - **Command:**
@@ -40,7 +40,7 @@ command, result, and decision.
 - **Result:** Confirmed on all three sub-experiments, logged to
   `results/e1_toy_bias.json`.
   - `baseline_replication` (log-score only, `t=[0.7,0.2,0.1]`) exactly
-    reproduces the seed-0 table already in `docs/PLAN.md` §4: `p*` = [0.700,
+    reproduces the seed-0 table already in `the project plan` §4: `p*` = [0.700,
     0.200, 0.100] / [0.723, 0.187, 0.090] / [0.780, 0.154, 0.066] / [0.905,
     0.071, 0.024] at σ = 0 / 0.5 / 1.0 / 2.0.
   - `full_reward` (Laya's log+spherical(−RPS), same target, both `choice`
@@ -60,7 +60,7 @@ command, result, and decision.
     largest for peaked, low-to-mid-K targets.
 - **Decision:** Adopt as report evidence for §V's proposition (see
   `docs/analysis/2026-09-24/proof_sketch_smoothed_log_score.md`). Confirms prediction 2
-  from `docs/RESEARCH.md` §Method ("raw ECE and fitted T increase
+  from `the research notes` §Method ("raw ECE and fitted T increase
   monotonically with σ") at the toy level; E2 checks whether it holds when
   the RL term is combined with Laya's CE term (weight 1.0) on real data,
   which this toy setup does not include. Follow-up (not yet done): extend
@@ -148,7 +148,7 @@ command, result, and decision.
 
 ### 2026-09-25 — E2 + E3: loss ablation, 13 runs on one rented A100
 
-- **Hypothesis:** `docs/PLAN.md` §5 predictions 1–3: CE-only is at least as
+- **Hypothesis:** `the project plan` §5 predictions 1–3: CE-only is at least as
   calibrated as RL+CE; the bias grows with σ; RL-only ends over-confident.
 - **Config:** `configs/e2/{laya_rlce,ce_only,rl_only,rlce_sigma0p5_fixed,rlce_sigma1_fixed,rlce_sigma2_fixed}.yaml`.
   Seeds 42/43/44 for laya_rlce, ce_only and σ = 1; seed 42 for the rest;

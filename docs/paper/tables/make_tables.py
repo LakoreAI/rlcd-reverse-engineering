@@ -27,6 +27,46 @@ ORDER = [
 ]
 
 
+# Fixed-sigma sweep (RL+CE) and w_rl/w_ce ratio at sigma=1, plus E4's reward
+# composition. Missing runs are skipped so partial batches still build.
+SWEEP = [
+    ("e2_rlce_sigma0p25_fixed", r"$\sigma{=}0.25$"),
+    ("e2_rlce_sigma0p5_fixed", r"$\sigma{=}0.5$"),
+    ("e2_rlce_sigma1_fixed", r"$\sigma{=}1$"),
+    ("e2_rlce_sigma2_fixed", r"$\sigma{=}2$"),
+    ("e2_rlce_sigma3_fixed", r"$\sigma{=}3$"),
+    ("e2_rlce_sigma4_fixed", r"$\sigma{=}4$"),
+]
+RATIO = [
+    ("e2_rlce_wrl0p5_sigma1_fixed", r"$0.5$"),
+    ("e2_rlce_sigma1_fixed", r"$1$"),
+    ("e2_rlce_wrl2_sigma1_fixed", r"$2$"),
+]
+E4 = [
+    ("e4_log_only", "log only"),
+    ("e4_log_sph", "log + sph"),
+    ("e4_log_rps", "log + RPS"),
+    ("e2_laya_rlce", "full (log+sph+RPS)"),
+]
+EXTRA_COLS = ["gap", "soft_ece", "nll", "post_nll", "T[noul/b0]", "raw_ece", "acc"]
+
+
+def emit_extra(per_cfg, order, path) -> None:
+    lines = []
+    for key, label in order:
+        rs = per_cfg.get(key) or []
+        if not rs:
+            continue
+        g = lambda k: [r[k] for r in rs]  # noqa: E731
+        cells = [label, str(len(rs))]
+        for col in EXTRA_COLS:
+            sign = col == "gap"
+            nd = 2 if col.startswith("T[") else 3
+            cells.append(ms(g(col), nd, sign=sign))
+        lines.append(" & ".join(cells) + r" \\")
+    (OUT / path).write_text("\n".join(lines) + "\n\\bottomrule\n")
+
+
 def cfg_of(run: str) -> str | None:
     if run.endswith("_rep2"):
         return None
@@ -170,6 +210,11 @@ def main() -> None:
             + r" \\"
         )
     (OUT / "e2_entropy.tex").write_text("\n".join(e_lines) + "\n\\bottomrule\n")
+
+    # --- extras: fixed-sigma sweep, w_rl/w_ce ratio, E4 reward composition ---
+    emit_extra(per_cfg, SWEEP, "e2_sweep.tex")
+    emit_extra(per_cfg, RATIO, "e2_ratio.tex")
+    emit_extra(per_cfg, E4, "e4_reward.tex")
     print("wrote", sorted(p.name for p in OUT.glob("*.tex")))
 
 

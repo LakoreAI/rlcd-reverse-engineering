@@ -35,7 +35,7 @@ cd docs/paper && tectonic -X compile main.tex               # XeTeX, fetches pac
 Under XeTeX the preamble loads TeX Gyre Termes (a Times clone). Under
 pdfLaTeX, IEEEtran's own Times setup applies.
 
-## Guardrails (docs/PLAN.md §7)
+## Guardrails
 
 Jev is described only as "consistent with TypeSafe's public claims". Raw
 ECE is always shown next to post-temperature ECE. There are no "beats Jev"

@@ -33,7 +33,7 @@ raw ECE ≈ 0.33, worse than every E2 run. Against these labels:
 - the §V bias (sharpening as σ grows) *lowers* hard-label ECE instead of
   raising it.
 
-So `docs/PLAN.md` §5 prediction 1 ("CE-only raw ECE ≤ RL+CE raw ECE") and
+So `the project plan` §5 prediction 1 ("CE-only raw ECE ≤ RL+CE raw ECE") and
 the ECE half of prediction 2 have the wrong sign on this dataset. They
 cannot test the claim as stated. This does not affect Laya's published
 numbers as *comparisons*, but it matters for reading them: Laya's "raw ECE
@@ -67,5 +67,5 @@ reference point, not as the calibration verdict.
   soft-target NLL ≤ RL+CE". Report the original ECE form as-is and explain
   why it isn't a valid test here.
 - A true outcome-calibration test needs labels drawn *from* a distribution
-  (human multi-annotator sets such as ChaosNLI; `docs/PLAN.md` §6 future
+  (human multi-annotator sets such as ChaosNLI; `the project plan` §6 future
   work), not a teacher's argmax.

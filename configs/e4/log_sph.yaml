@@ -1,5 +1,5 @@
 # E4 — reward composition, "log + spherical": identical to
-# configs/e2/laya_rlce.yaml except the RPS term is off. See docs/PLAN.md
+# configs/e2/laya_rlce.yaml except the RPS term is off. See the project plan
 # sec. 5, E4.
 
 dataset_name: LocalLLaMA/typed-decisions

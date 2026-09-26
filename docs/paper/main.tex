@@ -17,6 +17,8 @@
 \usepackage{algorithmic}
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
 \usepackage{url}
 \def\UrlBreaks{\do\/\do-\do\_\do.}
 \usepackage[hidelinks]{hyperref}
@@ -210,6 +212,35 @@ scorer reads one logit $z_i$ from the hidden state at each option's
 \texttt{[MASK]}, and inference reports $p=\softmax(z/T)$. We rebuilt this
 model and checked tensor by tensor that Laya's released weights load into our
 version (Appendix~\ref{app:repro}).
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  node distance=3.0mm,
+  box/.style={draw=black, rounded corners=1pt, align=center, inner sep=2.0pt,
+              minimum height=4.4mm, text width=0.86\columnwidth},
+  enc/.style={box, fill=blue!8},
+  arr/.style={-{Latex[length=1.5mm]}, draw=black, line width=0.4pt},
+]
+\node[box] (seq) {\texttt{[CLS] <type> question: <instr> [SEP]}\\[1pt]
+                  \texttt{[MASK] opt$_0$\, [MASK] opt$_1$\, \dots\, [SEP] <state> [SEP]}};
+\node[enc, below=of seq] (enc) {ModernBERT-large (bidirectional encoder)};
+\node[box, below=of enc] (type) {$h \mathrel{+}= \mathrm{type\_emb}(\text{qtype})$};
+\node[box, below=of type] (head) {head: $2\times$ pre-norm TransformerEncoderLayer};
+\node[box, below=of head] (gather) {gather $h$ at each \texttt{[MASK]} $\to h_0,\dots,h_{K-1}$};
+\node[box, below=of gather] (scorer) {scorer MLP $\to z_0,\dots,z_{K-1}$};
+\node[box, below=of scorer] (out) {$p=\softmax(z/T)$ over the $K$ options};
+\foreach \a/\b in {seq/enc, enc/type, type/head, head/gather, gather/scorer, scorer/out}
+  \draw[arr] (\a) -- (\b);
+\end{tikzpicture}
+\caption{The typed-decision model shared by every run in this report: a
+bidirectional encoder, a type embedding, a small transformer head, and one
+logit read out per \texttt{[MASK]} option marker. The runs differ only in the
+training loss and the sequence budget (Sec.~\ref{sec:e2}), not in this
+architecture.}
+\label{fig:model}
+\end{figure}
 
 Algorithm~\ref{alg:laya} restates the training step from Laya's
 typed-decisions fine-tune notebook~\cite{laya_repo}. Two details in it are
@@ -752,22 +783,5 @@ Run & gap & $\mathrm{ECE}_t$ & NLL & Brier & $T_c$ & $T_s$ & $T_n$ & ECE & Acc. 
 \input{tables/e2_all_runs.tex}
 \end{tabular}}
 \end{table}
-
-\section{The RLCD loss (condensed from our port)}
-\begin{lstlisting}[language=Python]
-k   = mask.sum(-1, keepdim=True).clamp(min=2)
-eps = torch.randn((G,) + z.shape) * sigma * mask
-eps = (eps - eps.sum(-1, keepdim=True) / k) * mask
-zs  = z.detach().unsqueeze(0) + eps
-q   = torch.softmax(zs.masked_fill(~mask, -1e4), -1)
-with torch.no_grad():
-    r   = proper_reward(q, t, qtype, mask, w_sph=0.75)
-    adv = r - r.mean(0, keepdim=True)
-    adv = adv / (adv.std() + 1e-6)
-logp    = -(((zs - z) ** 2) * mask).sum(-1) / (2 * sigma**2)
-loss_rl = -(adv * logp).mean()
-loss_ce = -(t * torch.log_softmax(z, -1)).sum(-1).mean()
-loss    = w_rl * loss_rl + w_ce * loss_ce
-\end{lstlisting}
 
 \end{document}

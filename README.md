@@ -1,4 +1,4 @@
-# Reverse-Engineering RLCD
+# Dissecting RLCD
 
 A technical report project analysing what "Reinforcement Learning for
 Calibrated Decisions" (RLCD) does — and doesn't do — for typed probabilistic
@@ -13,22 +13,45 @@ distribution toward over-confidence as σ grows.
 
 Start here:
 
-- **[`docs/PLAN.md`](docs/PLAN.md)** — the full project brief: background on
-  Jev/Laya, Laya's verified internals, the central analytical finding, the
-  experiment matrix (E1–E5), datasets, and the IEEE report outline.
-- **[`docs/RESEARCH.md`](docs/RESEARCH.md)** — the distilled research
-  question, scope, and method derived from the plan.
-- **[`docs/TODO.md`](docs/TODO.md)** — the step-by-step task list from this
-  scaffold to a submitted report.
+- **[`docs/paper/main.pdf`](docs/paper/main.pdf)** — the IEEE-format technical
+  report (*Dissecting RLCD*), built from `docs/paper/main.tex`; every table and
+  figure regenerates from the JSON result files.
 - **[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md)** — the runbook/log for each
-  gated experiment (hypothesis, config, command, result, decision).
+  experiment (hypothesis, config, command, result, decision).
 - **[`docs/reports/`](docs/reports/)** — dated run/compute reports
   (`docs/reports/YYYY-MM-DD/<topic>.md`), e.g. the E2 results.
-- **[`docs/analysis/`](docs/analysis/)** — dated analytical notes
-  (`docs/analysis/YYYY-MM-DD/<topic>.md`) (e.g.
-  the noise-smoothing over-confidence proof sketch) that feed the report.
+- **[`docs/analysis/`](docs/analysis/)** — dated analytical notes that feed the
+  report (e.g. the noise-smoothing over-confidence proof sketch).
 - **[`experiments/`](experiments/)** — self-contained numerical scripts (E1's
   toy bias check) that don't need the full `src/` training pipeline.
+- **[`scripts/e2/`](scripts/e2/)** — the rented-GPU runbook plus the analysis
+  tooling: HF export/fetch, the σ sweep, the reward-weight ratio, E4, E5, the
+  noise-averaging probe, and paired-bootstrap statistics.
+
+## Results and model
+
+The report's central result: Laya's RL term is a score-function
+(evolution-strategies) estimator of the gradient of a noise-smoothed proper
+scoring rule. As the noise vanishes it equals the cross-entropy gradient the
+model already computes; at non-zero noise its optimum is provably over-sharp at
+inference. Across the full ablation — CE-only / RL+CE / RL-only, a σ sweep to 4,
+a reward-weight sweep, and a reward-composition sweep — CE-only is at least as
+good on every proper score. The only change that raised accuracy was matching
+the checkpoint's documented 1024-token sequence budget:
+
+| model | accuracy | Brier | NLL |
+|---|---|---|---|
+| CE-only (512/192) | 0.782 ± 0.004 | 0.052 | 0.861 |
+| RL+CE (Laya recipe) | 0.773 ± 0.002 | 0.054 | 0.866 |
+| **CE-only, 1024/256** | **0.789** | **0.0495** | **0.858** |
+| Laya `typed-decisions` (reference) | 0.766 | 0.062 | — |
+
+The best checkpoint is published as a Hugging Face model:
+**[minhleduc/laya-typed-decisions-ce-1024](https://huggingface.co/minhleduc/laya-typed-decisions-ce-1024)**
+(model card, weights, fitted temperatures) and mirrored under
+**[LakoreAI/laya-typed-decisions-ce-1024](https://huggingface.co/LakoreAI/laya-typed-decisions-ce-1024)**.
+All ablation checkpoints and per-run metrics are in
+[minhleduc/rlcd-e2-checkpoints](https://huggingface.co/minhleduc/rlcd-e2-checkpoints).
 
 ## Scaffold status
 
@@ -37,7 +60,7 @@ template (config-driven training loop, callbacks, evaluation, tests). Its own
 "Extending the template" contract — replace the model/dataset/loss/metrics,
 keep the checkpoint schema, CLI, and callbacks working — is exactly what has
 been done: `src/` now implements the typed-decision (RLCD/Laya-style) model
-needed for E2 (docs/PLAN.md sec. 5's loss ablation) directly in place, not as
+needed for the E2 loss ablation directly in place, not as
 a parallel package. See [Repository layout](#repository-layout) below for
 what each file holds now.
 
@@ -78,7 +101,7 @@ the CUDA wheels, macOS resolves CPU/MPS wheels.
 ## Data format
 
 Training reads directly from a Hugging Face dataset shaped like
-`LocalLLaMA/typed-decisions` (docs/PLAN.md sec. 6): each row is one *case*
+`LocalLLaMA/typed-decisions`: each row is one *case*
 with three JSON-string columns —
 
 | Column | Contents |
@@ -94,7 +117,7 @@ with three JSON-string columns —
 A calibration slice is carved out of the train split at load time
 (`calib_fraction` in `TrainingConfig`) for raw-ECE validation and
 post-training temperature fitting — never from the test split
-(docs/PLAN.md sec. 5, Laya issue #186).
+(Laya issue #186).
 
 ## Training
 
@@ -113,7 +136,7 @@ The run writes `checkpoints/<run_name>/best.pt`, periodic `epoch_*.pt`, and a
 `train_log.json`. Checkpoints carry the model's `DecisionModelConfig` so the
 evaluator/inference script can rebuild it without the original YAML. `w_rl`
 / `w_ce` / `sigma_start` / `sigma_end` / `anneal_sigma` in `TrainingConfig`
-are exactly the E2 ablation knobs from docs/PLAN.md sec. 5 (CE-only:
+are exactly the E2 ablation knobs (CE-only:
 `w_rl: 0`; RL-only: `w_ce: 0`; fixed-σ: `anneal_sigma: false`).
 
 ## Evaluation and inference
@@ -134,24 +157,30 @@ uv run python -m src.pipelines.infer \
 
 ```
 src/
-├── config.py            # DecisionModelConfig — model architecture only; QTYPES
-├── data.py              # TypedDecisionDataset, build_sequence, collate_fn, calib split
+├── config.py            # DecisionModelConfig — architecture; QTYPES; optional cls_query/slot_emb
+├── data.py              # TypedDecisionDataset, build_sequence, collate_fn, calib split, permutation aug
 ├── modules/
 │   ├── model.py         # DecisionModel: encoder + transformer head + marker readout
 │   └── loss.py          # rlcd_loss (RL+CE), proper_reward, probability/label helpers
 ├── pipelines/
 │   ├── config.py        # TrainingConfig — training-loop hyperparameters (incl. RLCD loss weights)
 │   ├── train.py         # training loop + callback wiring
-│   ├── eval.py          # raw/post-temperature ECE, Brier, NLL, temperature fitting
-│   └── infer.py         # single-checkpoint inference
-├── callbacks/           # checkpoint, early_stopping, lr_scheduler, wandb — unmodified, domain-agnostic
-└── utils/               # io, model, device helpers — unmodified
-configs/                 # training YAML configs (train.yaml, rlcd_smoke.yaml)
-experiments/             # standalone numerical scripts (E1 toy bias)
+│   ├── eval.py          # raw/post-temperature ECE, Brier, NLL, temperature fitting, paired bootstrap
+│   └── infer.py         # single-checkpoint inference (loads .pt or weights-only .safetensors)
+├── callbacks/           # checkpoint, early_stopping, lr_scheduler, wandb
+└── utils/               # io, model, device helpers
+configs/
+├── train.yaml, rlcd_smoke.yaml
+├── e2/                  # loss ablation, σ sweep, reward-weight ratio, 1024 budget, augmentation
+└── e4/                  # reward-composition configs
+experiments/             # E1 toy smoothing-bias script
 scripts/
-└── training/            # train, evaluate, smoke_test
-tests/                   # pytest suite (conftest.py has offline fake tokenizer/encoder fixtures)
-docs/                    # research plan, notes, experiment log, analysis notes
+├── training/            # train, evaluate, smoke_test
+├── e2/                  # run_min, HF export/fetch, summarize, row_analysis, paired_nll,
+│                        #   noise_average_probe, accuracy_boost, dump_logits
+└── e5/                  # consistency_probes
+tests/                   # pytest suite (offline fake tokenizer/encoder fixtures)
+docs/                    # experiment log, run reports, analysis notes, paper (IEEE .tex/.pdf)
 notebooks/               # exploratory notebooks
 ```
 
