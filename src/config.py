@@ -44,6 +44,14 @@ class DecisionModelConfig:
     head_dropout: float = 0.1
     num_qtypes: int = 3  # choice / score / noul, see QTYPES above
 
+    # --- optional learned readout embeddings (off by default; architecture
+    # experiments on top of the frozen-encoder readout) ---
+    # cls_query: prepend a learned CLS query to the head and feed its output,
+    #   concatenated with each option's marker state, into the scorer.
+    # slot_emb: add a learned per-option-slot embedding to each marker state.
+    cls_query: bool = False
+    slot_emb: bool = False
+
     # --- sequence budgets ---
     max_len: int = 512
     head_max_len: int = 192  # 192 EN / 256 multilingual in Laya's real checkpoints

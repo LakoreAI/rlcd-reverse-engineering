@@ -79,7 +79,10 @@ def load_laya_weights(model: DecisionModel, source: str) -> None:
         if not k.startswith(_LAYA_SKIPPED_PREFIXES)
     }
     missing, unexpected = model.load_state_dict(state, strict=False)
-    missing = [k for k in missing if k != "temperature"]
+    # Laya has no counterpart for the post-hoc temperature buffer or the
+    # optional learned readout embeddings; those start from their init.
+    allowed_missing = {"temperature", "cls_emb", "slot_emb.weight"}
+    missing = [k for k in missing if k not in allowed_missing]
     if missing or unexpected:
         raise RuntimeError(
             f"Laya checkpoint mismatch: missing={missing[:5]} unexpected={unexpected[:5]}"

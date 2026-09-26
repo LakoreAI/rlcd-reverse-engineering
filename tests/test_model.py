@@ -49,6 +49,20 @@ def test_type_embedding_changes_logits(dummy_encoder):
     assert not torch.allclose(logits_a, logits_b)
 
 
+def test_learned_readout_embeddings_forward(dummy_encoder):
+    cfg = DecisionModelConfig(head_layers=1, cls_query=True, slot_emb=True)
+    model = DecisionModel(cfg, encoder=dummy_encoder).eval()
+    d = dummy_encoder.config.hidden_size
+    assert model.scorer[1].in_features == 2 * d  # marker state + CLS context
+    assert model.slot_emb is not None and model.cls_emb is not None
+    ids, attention_mask, marker_pos, marker_mask, qtype = make_batch()
+    with torch.no_grad():
+        logits = model(ids, attention_mask, marker_pos, marker_mask, qtype)
+    assert logits.shape == (B, K)
+    assert torch.isfinite(logits[marker_mask]).all()
+    assert (logits[~marker_mask] == -1e4).all()
+
+
 def test_temperature_buffer_shape(dummy_encoder):
     cfg = DecisionModelConfig(head_layers=1, num_qtypes=3, k_buckets=(2, 5, 10))
     model = DecisionModel(cfg, encoder=dummy_encoder)
