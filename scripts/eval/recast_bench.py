@@ -62,6 +62,13 @@ TASKS = {
         "split": "test",
         "text": "text",
         "instruction": "What is the sentiment of this text?",
+        "labels": [
+            "very negative",
+            "negative",
+            "neutral",
+            "positive",
+            "very positive",
+        ],
     },
 }
 
@@ -179,7 +186,13 @@ def main() -> None:
     model.eval()
 
     ds = load_dataset(spec["path"], split=args.split or spec["split"])
-    names = ds.features["label"].names
+    label_feature = ds.features["label"]
+    if hasattr(label_feature, "names"):
+        names = label_feature.names
+    elif spec.get("labels"):
+        names = spec["labels"]
+    else:
+        names = [str(i) for i in range(int(max(r["label"] for r in ds)) + 1)]
     if args.limit:
         ds = ds.select(range(min(len(ds), args.limit)))
     records = [(r[spec["text"]], r["label"]) for r in ds]
