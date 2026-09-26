@@ -99,7 +99,8 @@ def main() -> None:
         shuffle=False,
         collate_fn=partial(collate_fn, pad_token_id=tokenizer.pad_token_id),
     )
-    generator = torch.Generator(device=device).manual_seed(args.seed)
+    # z is moved to CPU below, so the noise generator must be a CPU generator.
+    generator = torch.Generator().manual_seed(args.seed)
 
     agg: dict[str, list[float]] = defaultdict(list)
     by_type: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
