@@ -112,6 +112,11 @@ This report asks what that RL term actually does. There are four findings.
   that measures the bias rather than rewarding it.
 \end{enumerate}
 
+Our experiments find that the RL term never beats plain cross-entropy on
+accuracy or on any proper score, that its noise makes inference over-confident
+in proportion to $\sigma$, and that the only change which raises accuracy is
+the input token budget.
+
 % =====================================================================
 \section{Background and Related Work}
 
