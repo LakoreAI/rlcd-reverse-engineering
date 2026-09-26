@@ -70,7 +70,6 @@ what each file holds now.
 - [Data format](#data-format)
 - [Training](#training)
 - [Evaluation and inference](#evaluation-and-inference)
-- [Repository layout](#repository-layout)
 - [Configuration](#configuration)
 - [Extending the template](#extending-the-template)
 - [License](#license)
@@ -151,37 +150,6 @@ uv run python -m src.pipelines.infer \
     --ckpt checkpoints/<run>/best.pt \
     --state '{"task": "..."}' \
     --question '{"type": "choice", "instructions": "...", "criteria": {"a": "...", "b": "..."}}'
-```
-
-## Repository layout
-
-```
-src/
-├── config.py            # DecisionModelConfig — architecture; QTYPES; optional cls_query/slot_emb
-├── data.py              # TypedDecisionDataset, build_sequence, collate_fn, calib split, permutation aug
-├── modules/
-│   ├── model.py         # DecisionModel: encoder + transformer head + marker readout
-│   └── loss.py          # rlcd_loss (RL+CE), proper_reward, probability/label helpers
-├── pipelines/
-│   ├── config.py        # TrainingConfig — training-loop hyperparameters (incl. RLCD loss weights)
-│   ├── train.py         # training loop + callback wiring
-│   ├── eval.py          # raw/post-temperature ECE, Brier, NLL, temperature fitting, paired bootstrap
-│   └── infer.py         # single-checkpoint inference (loads .pt or weights-only .safetensors)
-├── callbacks/           # checkpoint, early_stopping, lr_scheduler, wandb
-└── utils/               # io, model, device helpers
-configs/
-├── train.yaml, rlcd_smoke.yaml
-├── e2/                  # loss ablation, σ sweep, reward-weight ratio, 1024 budget, augmentation
-└── e4/                  # reward-composition configs
-experiments/             # E1 toy smoothing-bias script
-scripts/
-├── training/            # train, evaluate, smoke_test
-├── e2/                  # run_min, HF export/fetch, summarize, row_analysis, paired_nll,
-│                        #   noise_average_probe, accuracy_boost, dump_logits
-└── e5/                  # consistency_probes
-tests/                   # pytest suite (offline fake tokenizer/encoder fixtures)
-docs/                    # experiment log, run reports, analysis notes, paper (IEEE .tex/.pdf)
-notebooks/               # exploratory notebooks
 ```
 
 ## Configuration
