@@ -42,8 +42,16 @@ the checkpoint's documented 1024-token sequence budget:
 |---|---|---|---|
 | CE-only (512/192) | 0.782 ± 0.004 | 0.052 | 0.861 |
 | RL+CE (Laya recipe) | 0.773 ± 0.002 | 0.054 | 0.866 |
+| RL-only | 0.769 | 0.054 | 0.866 |
 | **CE-only, 1024/256** | **0.789** | **0.0495** | **0.858** |
+| CE-only, 1024/256, typed-decisions init | 0.789 | 0.051 | 0.859 |
 | Laya `typed-decisions` (reference) | 0.766 | 0.062 | — |
+
+The budget lever is not specific to typed decisions. On a high-cardinality
+recast task (Banking77, 77 options) raising the option-token budget from 256 to
+512 roughly doubles zero-shot accuracy — 15.8% → 31.2% (base Laya) and 15.8% →
+32.0% (the CE-only model) — while it changes nothing on 4–6-option tasks
+(AG News 94.5%, Emotion 59.8%, matching Laya's published 95.0 / 59.5).
 
 The best checkpoint is published as a Hugging Face model:
 **[minhleduc/laya-typed-decisions-ce-1024](https://huggingface.co/minhleduc/laya-typed-decisions-ce-1024)**
