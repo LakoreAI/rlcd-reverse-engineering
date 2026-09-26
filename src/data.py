@@ -73,6 +73,19 @@ def target_vector(question: dict, gold_entry: dict) -> list[float]:
     return [float(probs[k]) for k in option_keys(question)]
 
 
+def _permute_question(question: dict) -> dict:
+    """Shallow-copy `question` with choice/noul option order shuffled.
+
+    `target_vector`/`label_index` index by option *key*, so they follow the
+    shuffled order automatically — the augmentation is label-preserving.
+    """
+    items = list(question["criteria"].items())
+    order = torch.randperm(len(items)).tolist()
+    q = dict(question)
+    q["criteria"] = {items[i][0]: items[i][1] for i in order}
+    return q
+
+
 def label_index(question: dict, gold_entry: dict) -> int:
     """Index of the gold `label` among `option_keys`, or -1 if absent.
 
@@ -159,11 +172,17 @@ class TypedDecisionDataset(Dataset):
     """
 
     def __init__(
-        self, hf_dataset, tokenizer, max_len: int = 512, head_max_len: int = 192
+        self,
+        hf_dataset,
+        tokenizer,
+        max_len: int = 512,
+        head_max_len: int = 192,
+        augment_permute: bool = False,
     ):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.head_max_len = head_max_len
+        self.augment_permute = augment_permute
         self._rows: list[tuple[str, dict, dict]] = []
         for example in hf_dataset:
             state = example["state"]
@@ -177,6 +196,9 @@ class TypedDecisionDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, object]:
         state, question, gold_entry = self._rows[index]
+        if self.augment_permute and question["type"] in ("choice", "noul"):
+            if "criteria" in question:
+                question = _permute_question(question)
         ids, markers = build_sequence(
             self.tokenizer, state, question, self.max_len, self.head_max_len
         )

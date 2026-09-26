@@ -1,11 +1,13 @@
 import json
 
 import pytest
+import torch
 from datasets import Dataset as HFDataset
 
 from src.config import QTYPES
 from src.data import (
     TypedDecisionDataset,
+    _permute_question,
     build_sequence,
     collate_fn,
     label_index,
@@ -210,3 +212,39 @@ def test_collate_fn_carries_labels(dummy_tokenizer):
     )
     batch = collate_fn([ds[0]], pad_token_id=dummy_tokenizer.pad_token_id)
     assert batch["label"].tolist() == [1]
+
+
+def test_permute_question_is_label_preserving():
+    torch.manual_seed(0)
+    q = {
+        "type": "choice",
+        "instructions": "?",
+        "criteria": {"a": "A", "b": "B", "c": "C"},
+    }
+    p = _permute_question(q)
+    assert set(p["criteria"]) == set(q["criteria"])
+    assert q["criteria"] == {"a": "A", "b": "B", "c": "C"}  # original untouched
+    gold = {"probabilities": {"a": 0.5, "b": 0.3, "c": 0.2}}
+    keys = option_keys(p)
+    assert target_vector(p, gold) == [gold["probabilities"][k] for k in keys]
+    assert label_index(p, {"label": "b"}) == keys.index("b")
+
+
+def test_permute_augmentation_keeps_target_aligned(dummy_tokenizer):
+    torch.manual_seed(0)
+    case = make_hf_case(
+        "c0",
+        {"q1": CHOICE_Q},
+        {"q1": {"label": "go", "probabilities": {"stop": 0.4, "go": 0.6}}},
+    )
+    ds = TypedDecisionDataset(
+        HFDataset.from_list([case]),
+        dummy_tokenizer,
+        max_len=64,
+        head_max_len=32,
+        augment_permute=True,
+    )
+    for _ in range(5):
+        row = ds[0]
+        assert len(row["target"]) == len(row["markers"])
+        assert row["label"] in (0, 1)

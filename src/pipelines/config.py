@@ -25,6 +25,12 @@ class TrainingConfig:
     # Caps train/test to this many cases (applied before the calib split) —
     # a quick pipeline sanity check on a small slice, not a real run.
     max_examples: Optional[int] = None
+    # Randomly permute the option order of choice/noul questions on each
+    # training draw (label-preserving: the target/label follow the permuted
+    # keys). Score levels are ordinal and left alone. A cheap order-invariance
+    # augmenter / regularizer for the small training set; never applied to the
+    # calibration or test datasets.
+    augment_permute: bool = False
 
     # --- output ---
     ckpt_dir: str = "checkpoints"

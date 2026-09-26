@@ -193,7 +193,11 @@ def build_loaders(
     )
 
     train_dataset = TypedDecisionDataset(
-        train_hf, tokenizer, model_cfg.max_len, model_cfg.head_max_len
+        train_hf,
+        tokenizer,
+        model_cfg.max_len,
+        model_cfg.head_max_len,
+        augment_permute=train_cfg.augment_permute,
     )
     calib_dataset = (
         TypedDecisionDataset(
