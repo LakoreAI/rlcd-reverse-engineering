@@ -1,0 +1,70 @@
+# sigma-sweep extension: RL+CE, fixed sigma=0.25 (below Laya's annealed range)
+# E2 (optional 3rd run) — "RL+CE, fixed sigma = 0.25": identical to laya_rlce.yaml
+# except sigma is held at 1.0 for all epochs (no anneal) — one point on the
+# sigma axis for prediction 2 (raw ECE and fitted T grow with sigma). Laya setup:
+# Notebook values reproduced here: 4 epochs, effective batch 64 (2 GPU x 8 x
+# accum 4 -> 16 x accum 4 on one GPU), AdamW lr 2.5e-5 encoder / 1e-4 head,
+# wd 0.01, cosine over total updates to 1e-6, grad clip 1.0, G=4, sigma
+# 0.4 -> 0.1 linear per epoch, reward log + 0.75*spherical - 1.0*RPS,
+# CE weight 1.0, sequences built at max_len 512 / head_max_len 192.
+# Deliberate differences: bf16 instead of fp16+GradScaler, a case-level 10%
+# calibration split (Laya holds out 10% of question rows, capped at 400),
+# and temperature per (type, K-bucket) instead of per type.
+
+dataset_name: LocalLLaMA/typed-decisions
+dataset_config: all
+calib_fraction: 0.1
+seed: 42
+
+ckpt_dir: checkpoints
+result_dir: results
+run_name: e2_rlce_sigma0p25_fixed_seed42
+
+epochs: 4
+batch_size: 16
+accum_steps: 4
+num_workers: 4
+pin_memory: true
+amp: true
+amp_dtype: bf16
+gradient_checkpointing: false
+lr: 0.000025
+lr_head: 0.0001
+weight_decay: 0.01
+grad_clip: 1.0
+log_every: 10
+eval_every: 1
+ckpt_every: 4  # only the final epoch (weights + AdamW state is ~5 GB per file)
+
+w_rl: 1.0
+w_ce: 1.0
+num_noise_samples: 4
+sigma_start: 0.25
+sigma_end: 0.25
+anneal_sigma: false
+reward_w_spherical: 0.75
+reward_w_rps: 1.0
+
+arch: {encoder_name: answerdotai/ModernBERT-large, head_layers: 2, max_len: 512, head_max_len: 192}
+init_from: convaiinnovations/laya
+log_grad_diagnostics: true
+
+lr_scheduler:
+  type: cosine
+  t_max: auto  # total optimizer steps
+  eta_min: 0.000001
+# Fixed training budget for every E2 config: no early stopping, and the
+# final-epoch weights are what gets evaluated (not a checkpoint picked by
+# calibration ECE, which would bias the very metric being compared).
+early_stopping:
+  enabled: false
+save_best: false
+best_metric: raw_ece
+best_mode: min
+
+wandb:
+  enabled: true  # no-ops without WANDB_API_KEY / the wandb extra
+  project: rlcd-reverse-engineering
+  entity: null
+  group: e2-minimal
+  log_artifacts: false  # checkpoints go to HF instead (scripts/e2/export_to_hf.py)

@@ -39,12 +39,33 @@ def config_from_checkpoint(ckpt: dict) -> DecisionModelConfig:
     return DecisionModelConfig(**{k: v for k, v in saved.items() if k in known})
 
 
+def config_from_safetensors(weights_path: Path) -> DecisionModelConfig:
+    """Rebuild DecisionModelConfig from the `model_config.json` that
+    `scripts/e2/export_to_hf.py` writes next to a weights-only
+    `model.safetensors`, so the public HF artifacts can be used for
+    inference without the original `.pt` checkpoint."""
+    meta_path = Path(weights_path).parent / "model_config.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(
+            f"{meta_path.name} is required next to {Path(weights_path).name}"
+        )
+    saved = json.loads(meta_path.read_text())
+    known = {f.name for f in fields(DecisionModelConfig)}
+    return DecisionModelConfig(**{k: v for k, v in saved.items() if k in known})
+
+
 def load_model(ckpt_path: Path, device: torch.device):
     ckpt_path = Path(ckpt_path)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
-    raw = torch.load(ckpt_path, map_location=str(device))
-    cfg = config_from_checkpoint(raw)
+    if ckpt_path.suffix == ".safetensors":
+        from safetensors.torch import load_file
+
+        raw = {"model": load_file(str(ckpt_path))}
+        cfg = config_from_safetensors(ckpt_path)
+    else:
+        raw = torch.load(ckpt_path, map_location=str(device))
+        cfg = config_from_checkpoint(raw)
     model = DecisionModel(cfg).to(device)
     model.load_state_dict(raw["model"])
 
