@@ -49,7 +49,7 @@ the checkpoint's documented 1024-token sequence budget:
 The best checkpoint is published as a Hugging Face model:
 **[minhleduc/laya-typed-decisions-ce-1024](https://huggingface.co/minhleduc/laya-typed-decisions-ce-1024)**
 (model card, weights, fitted temperatures) and mirrored under
-**[LakoreAI/laya-typed-decisions-ce-1024](https://huggingface.co/LakoreAI/laya-typed-decisions-ce-1024)**.
+**[LakoreAI/sev](https://huggingface.co/LakoreAI/sev)**.
 All ablation checkpoints and per-run metrics are in
 [minhleduc/rlcd-e2-checkpoints](https://huggingface.co/minhleduc/rlcd-e2-checkpoints).
 
