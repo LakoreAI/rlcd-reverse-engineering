@@ -1,15 +1,15 @@
 # Sev
 
-**Dissecting RLCD** is a technical report project analysing what "Reinforcement Learning for
-Calibrated Decisions" (RLCD) does — and doesn't do — for typed probabilistic
-decisions, using TypeSafe's closed **Jev** model (public claims only) and its
-open reproduction attempt **[Laya](https://github.com/NandhaKishorM/laya)**
-(architecture + training loop verified from source) as the two reference
-points. Output is an IEEE-format report (6–8 pages, arXiv + GitHub) plus the
-small, reproducible experiments that back its central claim: Laya's RL term
-is a score-function (evolution-strategies) estimator of a noise-smoothed
-proper scoring rule, and that smoothing biases the noise-free inference-time
-distribution toward over-confidence as σ grows.
+**Sev** is a reproduction and clean-room analysis of RLCD, the training method
+behind typed-decision models. It ships the training and evaluation code, every
+config and per-run result file, the IEEE report, and the trained checkpoints.
+
+The report's finding: Laya's RL term is an evolution-strategies estimate of the
+gradient of a noise-smoothed proper scoring rule. As the noise vanishes it
+equals the cross-entropy gradient the model already computes; at real noise
+levels it makes inference over-confident. Across 30 runs, plain cross-entropy
+matched or beat it on every proper score, and the only thing that raised
+accuracy was the input token budget.
 
 Start here:
 
