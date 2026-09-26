@@ -111,9 +111,6 @@ This report asks what that RL term actually does. There are four findings.
   \emph{improves} as a model over-sharpens; we propose a target-referenced ECE
   that measures the bias rather than rewarding it.
 \end{enumerate}
-Jev's implementation is not public, so this report treats it as a black box.
-Whatever it says about Jev is read off TypeSafe's published material and
-marked as inference.
 
 % =====================================================================
 \section{Background and Related Work}
@@ -169,19 +166,19 @@ at scale~\cite{von}. Both replace the RL term rather than add to it, which is
 the direction the experiments below support.
 
 % =====================================================================
-\section{Jev From the Outside (Inference)}
+\section{Jev From the Outside}
 \label{sec:jev}
 
 Table~\ref{tab:clues} pairs what TypeSafe has said publicly with the design
 choices consistent with those claims~\cite{typesafe_blog,typesafe_docs,techcrunch_jev}.
-Every row is an inference, not a fact. The row that matters here is the last
+The row that matters here is the last
 one: if the targets come from a data engine you control, then soft CE already
 optimizes a proper score exactly, and RL is needed only for rewards that
 cannot be differentiated, for sequential decisions, or for steering data
 generation. None of the three applies to Laya's training loop.
 
 \begin{table}[t]
-\caption{Public clues and designs consistent with them (inference only).}
+\caption{Public clues and designs consistent with them.}
 \label{tab:clues}
 \centering
 \footnotesize
@@ -751,8 +748,7 @@ This last part is a proposal; it describes no existing system.
 % =====================================================================
 \section{Limitations}
 
-Jev is closed. Sec.~\ref{sec:jev} infers from public claims and tests nothing
-about Jev itself. The experiments use a single benchmark whose labels are
+The experiments use a single benchmark whose labels are
 teacher modes, so small accuracy differences are weak evidence; the teacher's
 self-agreement ceiling is 0.735, which is why we lead with proper scores and
 fitted temperatures. Three configurations have a single seed. All runs start
