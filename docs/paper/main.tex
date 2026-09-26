@@ -563,9 +563,12 @@ Jev is closed. Sec.~\ref{sec:jev} infers from public claims and tests nothing
 about Jev itself. The experiments use a single benchmark whose labels are
 teacher modes, so small accuracy differences are weak evidence; the teacher's
 self-agreement ceiling is 0.735, which is why we lead with proper scores and
-fitted temperatures. Three configurations have a single seed. All runs start
-from a checkpoint Laya had already trained with RLCD, which can only help
-RL-only. Proposition~\ref{prop:binary} covers the log score at $K{=}2$; the
+fitted temperatures. Random-seed choice alone can move accuracy by more than a
+modest architecture change~\cite{picard2021seed}, so we read small accuracy
+gaps as weak evidence, report three seeds where budget allows, and never
+compare models by single-seed accuracy. Several configurations still have a
+single seed. All runs start from a checkpoint Laya had already trained with
+RLCD, which can only help RL-only. Proposition~\ref{prop:binary} covers the log score at $K{=}2$; the
 general-$K$ and full-reward cases rest on numerics. The E3 diagnostics are
 taken at the logits, not the parameters. Model scale is fixed at 421M
 parameters.
