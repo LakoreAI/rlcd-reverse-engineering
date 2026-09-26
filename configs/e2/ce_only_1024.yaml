@@ -23,7 +23,7 @@ ckpt_dir: checkpoints
 result_dir: results
 run_name: e2_ce_only_1024_seed42
 
-epochs: 6
+epochs: 4
 batch_size: 16
 accum_steps: 4
 num_workers: 4
@@ -37,7 +37,7 @@ weight_decay: 0.01
 grad_clip: 1.0
 log_every: 10
 eval_every: 1
-ckpt_every: 6  # only the final epoch (weights + AdamW state is ~5 GB per file)
+ckpt_every: 4  # only the final epoch (weights + AdamW state is ~5 GB per file)
 
 w_rl: 0.0
 w_ce: 1.0
