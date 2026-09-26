@@ -69,6 +69,7 @@ def smoothed_optimum(
     batch: int = BATCH,
     lr: float = LR,
     seed: int = SEED,
+    return_logits: bool = False,
 ) -> torch.Tensor:
     """Gradient-descend z to minimise E_eps[-R(softmax(z+eps))] (or the pure
     log score when reward="log_only") and return the noise-free softmax(z*).
@@ -96,7 +97,22 @@ def smoothed_optimum(
         opt.step()
 
     with torch.no_grad():
+        if return_logits:
+            return z.detach()
         return torch.softmax(z, dim=-1)
+
+
+def noise_average(
+    z: torch.Tensor, sigma: float, samples: int = BATCH, seed: int = SEED
+):
+    """E_eps[softmax(z + eps)] with eps ~ N(0, sigma^2) projected to zero mean
+    — what the smoothed objective (Eq. 5) guarantees matches the target,
+    in contrast to the noise-free softmax(z) used at inference."""
+    g = torch.Generator().manual_seed(seed)
+    k = z.shape[-1]
+    eps = torch.randn((samples, k), generator=g) * sigma
+    eps = eps - eps.mean(-1, keepdim=True)
+    return torch.softmax(z.unsqueeze(0) + eps, dim=-1).mean(0)
 
 
 def kl(t: torch.Tensor, p: torch.Tensor) -> float:
@@ -115,18 +131,24 @@ def run_baseline_replication() -> list[dict]:
     t = torch.tensor([0.7, 0.2, 0.1])
     records = []
     for sigma in (0.0, 0.5, 1.0, 2.0):
-        p = smoothed_optimum(t, sigma, reward="log_only")
+        z = smoothed_optimum(t, sigma, reward="log_only", return_logits=True)
+        p = torch.softmax(z, dim=-1)
+        pbar = noise_average(z, sigma) if sigma > 0 else p
         records.append(
             {
                 "sigma": sigma,
                 "target": t.tolist(),
                 "noise_free_p": [round(v, 3) for v in p.tolist()],
+                "noise_averaged_p": [round(v, 3) for v in pbar.tolist()],
                 "kl_p_from_t": kl(t, p),
+                "kl_noise_averaged_from_t": kl(t, pbar),
                 "sharpness_max_p": sharpness(p),
+                "sharpness_max_noise_averaged": sharpness(pbar),
             }
         )
         print(
-            f"[baseline] sigma={sigma}: p*={p.round(decimals=3).tolist()} target={t.tolist()}"
+            f"[baseline] sigma={sigma}: p*={p.round(decimals=3).tolist()} "
+            f"E[p]={pbar.round(decimals=3).tolist()} target={t.tolist()}"
         )
     return records
 
@@ -139,20 +161,28 @@ def run_full_reward() -> list[dict]:
     records = []
     for qtype, is_score_type in (("choice", False), ("score", True)):
         for sigma in (0.0, 0.5, 1.0, 2.0):
-            p = smoothed_optimum(t, sigma, reward="full", is_score_type=is_score_type)
+            z = smoothed_optimum(
+                t, sigma, reward="full", is_score_type=is_score_type, return_logits=True
+            )
+            p = torch.softmax(z, dim=-1)
+            pbar = noise_average(z, sigma) if sigma > 0 else p
             records.append(
                 {
                     "qtype": qtype,
                     "sigma": sigma,
                     "target": t.tolist(),
                     "noise_free_p": [round(v, 3) for v in p.tolist()],
+                    "noise_averaged_p": [round(v, 3) for v in pbar.tolist()],
                     "kl_p_from_t": kl(t, p),
+                    "kl_noise_averaged_from_t": kl(t, pbar),
                     "sharpness_max_p": sharpness(p),
+                    "sharpness_max_noise_averaged": sharpness(pbar),
                 }
             )
             print(
                 f"[full_reward:{qtype}] sigma={sigma}: "
-                f"p*={p.round(decimals=3).tolist()} target={t.tolist()}"
+                f"p*={p.round(decimals=3).tolist()} E[p]={pbar.round(decimals=3).tolist()} "
+                f"target={t.tolist()}"
             )
     return records
 

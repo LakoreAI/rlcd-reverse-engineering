@@ -139,12 +139,23 @@ with soft CE therefore already optimizes a strictly proper score.
 Three post-training families are relevant here. RLHF optimizes a learned
 preference reward~\cite{christiano2017rlhf,ouyang2022instructgpt}, and
 post-training of this kind has itself been observed to degrade
-calibration~\cite{kadavath2022language,openai2023gpt4}; RLVR
+calibration~\cite{kadavath2022language,openai2023gpt4} and, when the reward is
+a proxy, to reward-hack it~\cite{gao2022overoptimization}; RLVR
 optimizes a verifiable reward~\cite{lambert2024tulu3}, often with a group-mean
 baseline as in GRPO~\cite{shao2024grpo}; RLCD, as publicly described, rewards
 calibrated typed distributions~\cite{rlcd_explained}. Perturbing logits and
 following the score function is Gaussian smoothing, which is to say evolution
 strategies~\cite{salimans2017es,nesterov2017random,mohamed2020mcgrad}.
+
+A second family smooths the \emph{target} rather than the logits. Label
+smoothing and mixup replace one-hot targets with softer ones, and both are
+known to reduce over-confidence and improve calibration, including for
+pre-trained encoders~\cite{muller2019labelsmoothing,thulasidasan2019mixup,desai2020calibration}.
+That is the opposite direction from this report: those methods change what the
+model is asked to fit, and inference reads the same (soft) prediction it was
+trained on. Laya smooths the logits at training time and then \emph{removes}
+the noise at inference, so the model fits a smoothed objective but reports a
+sharp one. The next section makes that gap precise.
 
 % =====================================================================
 \section{Jev From the Outside (Inference)}
