@@ -10,10 +10,12 @@
 #
 # Environment knobs:
 #   CONFIGS        runs to do, in order: "<config>[:<seed>[:<tag>]] ...", where
-#                  <config> is configs/e2/<config>.yaml. A seed overrides the
+#                  <config> is $CONFIG_DIR/<config>.yaml. A seed overrides the
 #                  config's and renames the run ..._seed<seed>; a tag is appended
 #                  (e.g. "laya_rlce:42:rep2" repeats a run under a new name).
 #                  Default "laya_rlce ce_only".
+#   CONFIG_DIR     directory the CONFIGS names live in (default configs/e2; set
+#                  CONFIG_DIR=configs/e4 for the E4 reward-composition runs).
 #   SKIP_PROBE     1 = skip the probe (machine already measured)
 #   BATCH / ACCUM  micro-batch and accumulation (default 16 / 4 = effective 64,
 #                  Laya's). On OOM use BATCH=8 ACCUM=8 (same effective batch).
@@ -28,6 +30,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 CONFIGS=${CONFIGS:-"laya_rlce ce_only"}
+CONFIG_DIR=${CONFIG_DIR:-configs/e2}
 BATCH=${BATCH:-16}
 ACCUM=${ACCUM:-4}
 GRAD_CKPT=${GRAD_CKPT:-0}
@@ -107,7 +110,7 @@ if [ "${PROBE_ONLY:-0}" = "1" ]; then stamp "PROBE_ONLY=1 - stopping"; exit 0; f
 # --- 4. the E2 runs -----------------------------------------------------
 for entry in $CONFIGS; do
   IFS=: read -r name seed tag <<< "$entry"
-  run_name=$(grep -E '^run_name:' "configs/e2/$name.yaml" | awk '{print $2}')
+  run_name=$(grep -E '^run_name:' "$CONFIG_DIR/$name.yaml" | awk '{print $2}')
   RUN_ARGS=()
   if [ -n "${seed:-}" ]; then
     run_name="${run_name%_seed*}_seed$seed"
@@ -116,7 +119,7 @@ for entry in $CONFIGS; do
   [ -n "${tag:-}" ] && run_name="${run_name}_$tag"
   RUN_ARGS+=(--run_name "$run_name")
   stamp "run $run_name"
-  uv run python -m src.pipelines.train --config "configs/e2/$name.yaml" \
+  uv run python -m src.pipelines.train --config "$CONFIG_DIR/$name.yaml" \
     "${COMMON[@]}" "${RUN_ARGS[@]}" 2>&1 | tee "$LOG_DIR/$run_name.log"
   # results/<run_name>/ now holds test_eval.json, train_log.json,
   # grad_diagnostics.json, config.json — small; fetch.sh pulls them.
