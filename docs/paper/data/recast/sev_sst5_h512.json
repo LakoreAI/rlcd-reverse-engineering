@@ -1,0 +1,8 @@
+{
+  "model": "/root/model/model.safetensors",
+  "task": "sst5",
+  "n_classes": 5,
+  "n": 1000,
+  "accuracy": 0.429,
+  "top5": 1.0
+}

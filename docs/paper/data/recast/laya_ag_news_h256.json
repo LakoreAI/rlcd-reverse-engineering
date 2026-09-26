@@ -1,0 +1,8 @@
+{
+  "model": "convaiinnovations/laya",
+  "task": "ag_news",
+  "n_classes": 4,
+  "n": 1000,
+  "accuracy": 0.945,
+  "top5": 1.0
+}

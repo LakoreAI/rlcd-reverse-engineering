@@ -1,0 +1,8 @@
+{
+  "model": "convaiinnovations/laya",
+  "task": "banking77",
+  "n_classes": 77,
+  "n": 1000,
+  "accuracy": 0.312,
+  "top5": 0.619
+}

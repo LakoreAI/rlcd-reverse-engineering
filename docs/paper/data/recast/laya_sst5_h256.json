@@ -1,0 +1,8 @@
+{
+  "model": "convaiinnovations/laya",
+  "task": "sst5",
+  "n_classes": 5,
+  "n": 1000,
+  "accuracy": 0.343,
+  "top5": 1.0
+}

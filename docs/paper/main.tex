@@ -679,6 +679,44 @@ swap the true/false wording) leaves a mean
 $|p(\text{true})-p_{\text{neg}}(\text{false})|$ of $0.53$: the two wordings are
 far from mutually exclusive.
 
+\subsection{E6: Cross-task generalization and the option budget}
+\label{sec:e6}
+
+The typed-decisions ablation holds the task fixed. To check that the option
+budget, not the loss, is what limits such a model, we recast four standard
+classification sets into typed \texttt{choice} questions (state = the text,
+options = the class names) and score the base Laya checkpoint and our CE-only
+1024/256 model zero-shot, at two option-token budgets (Table~\ref{tab:recast}).
+
+AG News (4 options) scores 94.5\% for both models and Emotion (6 options)
+59.8--60.2\%, matching Laya's own published 95.0\% and 59.5\%. The budget
+changes nothing on these low-cardinality sets, as expected when every option
+already fits. On Banking77 (77 options) it is decisive: raising the option-token
+budget from 256 to 512 roughly doubles accuracy, from 15.8\% to 31.2\% (Laya)
+and 15.8\% to 32.0\% (our model), and lifts top-5 from 39\% to 62\% (Laya) and
+42\% to 65\%. This is the starvation the checkpoint card warns about, and it is
+an order of magnitude larger at $K{=}77$ than the $+0.7$-point effect the same
+budget change had on typed decisions. The typed-decisions fine-tune also
+generalizes: our CE-only model matches or beats base Laya on every recast set
+(SST-5 42.9\% vs.\ 34.3\%).
+
+\begin{table}[t]
+\caption{E6: zero-shot accuracy (\%) on recast classification tasks, base Laya vs our CE-only 1024/256 model, at two option-token budgets. $K$ is the number of options.}
+\label{tab:recast}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+ & & \multicolumn{2}{c}{Laya} & \multicolumn{2}{c}{CE-only} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Task & $K$ & 256 & 512 & 256 & 512 \\
+\midrule
+\input{tables/recast.tex}
+\end{tabular}}
+\end{table}
+
 \subsection{Reproducibility}
 A second run of RL+CE seed 42 matched the first closely (NLL 0.864 / 0.867,
 accuracy 0.772 / 0.772), though not bitwise. An earlier seed-42 run is a
