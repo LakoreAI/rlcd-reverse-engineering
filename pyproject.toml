@@ -1,5 +1,5 @@
 [project]
-name = "rlcd-reverse-engineering"
+name = "sev"
 version = "0.1.0"
 description = "Reverse-engineering RLCD: analysis and reproducible experiments on noise-smoothed proper scoring rules for typed probabilistic decisions, using TypeSafe's Jev (public claims) and Laya (open reproduction) as references"
 readme = "README.md"
@@ -40,9 +40,9 @@ wandb = ["wandb>=0.16"]
 rich = ["rich>=13.0"]
 
 [project.urls]
-Homepage = "https://github.com/LakoreAI/rlcd-reverse-engineering"
-Repository = "https://github.com/LakoreAI/rlcd-reverse-engineering"
-Issues = "https://github.com/LakoreAI/rlcd-reverse-engineering/issues"
+Homepage = "https://github.com/LakoreAI/sev"
+Repository = "https://github.com/LakoreAI/sev"
+Issues = "https://github.com/LakoreAI/sev/issues"
 
 # Platform-aware torch builds.
 #   - Linux + NVIDIA: resolve the CUDA wheel index.

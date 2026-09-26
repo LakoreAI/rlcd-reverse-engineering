@@ -63,7 +63,7 @@ best_mode: min
 
 wandb:
   enabled: false
-  project: rlcd-reverse-engineering
+  project: sev
   entity: null
   group: null
   monitor: raw_ece

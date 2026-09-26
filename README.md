@@ -1,6 +1,6 @@
-# Dissecting RLCD
+# Sev
 
-A technical report project analysing what "Reinforcement Learning for
+**Dissecting RLCD** is a technical report project analysing what "Reinforcement Learning for
 Calibrated Decisions" (RLCD) does — and doesn't do — for typed probabilistic
 decisions, using TypeSafe's closed **Jev** model (public claims only) and its
 open reproduction attempt **[Laya](https://github.com/NandhaKishorM/laya)**
@@ -80,8 +80,8 @@ what each file holds now.
 Requires Python ≥ 3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-git clone <your-repo-url> rlcd-reverse-engineering
-cd rlcd-reverse-engineering
+git clone <your-repo-url> sev
+cd sev
 
 uv sync                # core: torch, transformers, datasets, numpy, scikit-learn
 uv sync --extra rich   # optional: pretty training summary (panels / tables)
@@ -204,7 +204,7 @@ early_stopping: {enabled: true, monitor: raw_ece, mode: min, patience: 3}
 save_best: true
 best_metric: raw_ece
 best_mode: min
-wandb: {enabled: false, project: rlcd-reverse-engineering}
+wandb: {enabled: false, project: sev}
 ```
 
 ## Extending the template

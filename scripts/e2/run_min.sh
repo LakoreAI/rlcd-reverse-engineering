@@ -4,7 +4,7 @@
 # another, each logged and its JSON results kept under results/.
 #
 # Run it detached so an SSH drop doesn't kill it:
-#   cd ~/rlcd-reverse-engineering
+#   cd ~/sev
 #   nohup bash scripts/e2/run_min.sh > e2.out 2>&1 &
 #   tail -f e2.out
 #

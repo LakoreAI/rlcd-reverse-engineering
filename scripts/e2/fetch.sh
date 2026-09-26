@@ -10,7 +10,7 @@ USER_=${3:-root}
 cd "$(dirname "$0")/../.."
 mkdir -p results
 ssh -p "$PORT" "$USER_@$HOST" \
-    'cd ~/rlcd-reverse-engineering && tar czf - results' \
+    'cd ~/sev && tar czf - results' \
   | tar xzf - -C .
 echo "fetched into ./results:"
 ls -1 results

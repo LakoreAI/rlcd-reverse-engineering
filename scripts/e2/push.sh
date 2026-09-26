@@ -21,6 +21,6 @@ COPYFILE_DISABLE=1 tar czf - --no-mac-metadata \
   --exclude=__pycache__ --exclude=.pytest_cache --exclude=.ruff_cache \
   --exclude='*.ipynb_checkpoints' . \
   | ssh -p "$PORT" "$USER_@$HOST" \
-      'mkdir -p ~/rlcd-reverse-engineering && tar xzf - -C ~/rlcd-reverse-engineering'
+      'mkdir -p ~/sev && tar xzf - -C ~/sev'
 rm -f GIT_REV.txt
-echo "pushed to $USER_@$HOST:~/rlcd-reverse-engineering"
+echo "pushed to $USER_@$HOST:~/sev"

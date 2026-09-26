@@ -52,7 +52,7 @@ best_mode: min
 
 wandb:
   enabled: true
-  project: rlcd-reverse-engineering
+  project: sev
   entity: null
   group: e4-reward
   log_artifacts: false

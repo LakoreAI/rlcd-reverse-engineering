@@ -137,7 +137,7 @@ faithful, and slightly better on one A100 with bf16.
 | what | where |
 |---|---|
 | weights (fp32 safetensors, 1.6 GB each), per-run JSONs, raw calib/test logits (`logits.pt`) | HF `minhleduc/rlcd-e2-checkpoints` (private); local copy of weights in `checkpoints/e2/` |
-| training curves, E3 diagnostics, test summaries | W&B `octoopt/rlcd-reverse-engineering`, group `e2-minimal` |
+| training curves, E3 diagnostics, test summaries | W&B `octoopt/sev`, group `e2-minimal` |
 | run logs, `pip freeze`, GPU info, first attempt | `results/e2_vm/` (git-ignored) |
 | tables | `results/e2_summary.json` via `scripts/e2/summarize.py --runs_dir results/e2_vm/results` |
 

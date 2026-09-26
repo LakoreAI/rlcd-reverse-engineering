@@ -36,7 +36,7 @@ bash scripts/e2/push.sh <host> <port>
 
 # 2. on the machine
 ssh root@<host> -p <port>
-cd ~/rlcd-reverse-engineering
+cd ~/sev
 nohup bash scripts/e2/run_min.sh > e2.out 2>&1 &
 tail -f e2.out        # Ctrl-C only stops tail; the run keeps going
 ```

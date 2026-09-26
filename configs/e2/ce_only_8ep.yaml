@@ -64,7 +64,7 @@ best_mode: min
 
 wandb:
   enabled: true  # no-ops without WANDB_API_KEY / the wandb extra
-  project: rlcd-reverse-engineering
+  project: sev
   entity: null
   group: e2-minimal
   log_artifacts: false  # checkpoints go to HF instead (scripts/e2/export_to_hf.py)
