@@ -55,12 +55,14 @@ target once the noise is removed for inference, and the gap grows with the
 noise scale~$\sigma$. A 13-run ablation that reproduces Laya's fine-tune on
 the typed-decisions benchmark shows the effect at full scale: at fixed
 $\sigma\in\{0.5,1,2\}$, the temperature fitted to binary questions rises from
-1.2 to 1.7 and the target-referenced calibration error from 0.054 to 0.111.
-At Laya's own annealed schedule the RL gradient is 8--87$\times$ the CE
-gradient, yet it changes nothing measurable, and CE alone is at least as good
-on every metric we track. The benchmark's hard labels turn out to be the
-teacher's argmax, which makes hard-label ECE reward over-sharpening; we
-propose scoring against the target distribution instead.
+1.2 to 1.7 and NLL from 0.871 to 0.928, while accuracy stays flat. At Laya's
+own annealed schedule the RL gradient is 8--87$\times$ the CE gradient, yet it
+changes nothing measurable, and CE alone is at least as good on every metric
+we track. The benchmark's hard labels turn out to be the teacher's argmax,
+which makes hard-label ECE reward over-sharpening; we propose scoring against
+the target distribution instead. Finally, the only change that improves
+accuracy is not in the loss at all: matching the checkpoint's documented
+1024-token sequence budget raises accuracy from 0.782 to 0.789.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -156,6 +158,14 @@ model is asked to fit, and inference reads the same (soft) prediction it was
 trained on. Laya smooths the logits at training time and then \emph{removes}
 the noise at inference, so the model fits a smoothed objective but reports a
 sharp one. The next section makes that gap precise.
+
+Open reproductions also point past Laya's recipe. Verdict-2.0, a 151M
+ModernBERT-base decision model, reports higher accuracy than Laya on this same
+benchmark ($0.771$ vs.\ $0.766$) with far lower ECE ($0.0144$ vs.\ $0.213$)
+using a cross-entropy plus Brier composite loss~\cite{openjev}; a larger
+multi-domain model uses the same $L_\mathrm{CE}+\lambda L_\mathrm{Brier}$ form
+at scale~\cite{von}. Both replace the RL term rather than add to it, which is
+the direction the experiments below support.
 
 % =====================================================================
 \section{Jev From the Outside (Inference)}
@@ -368,19 +378,22 @@ grows.}
 \subsection{E2: Loss ablation on real data}
 \label{sec:e2}
 
-We replicate Laya's typed-decisions fine-tune on a single A100. Every run
-starts from \texttt{convaiinnovations/laya}~\cite{laya_hf}, trains for 4
-epochs at effective batch 64, and uses AdamW with learning rate
-$2.5\cdot10^{-5}$ on the encoder and $10^{-4}$ on the head, cosine decay,
-gradient clipping at 1.0, $G{=}4$, $\sigma$ annealed from 0.4 to 0.1, and
-bf16. The loss is the only thing that changes: CE-only ($w_\mathrm{rl}{=}0$),
-Laya's RL+CE, RL-only ($w_\mathrm{ce}{=}0$), and RL+CE at fixed
-$\sigma\in\{0.5,1,2\}$. CE-only, RL+CE and $\sigma{=}1$ were run with three
-seeds; the rest with one. All runs share a fixed budget and are evaluated on
-their final weights, with temperature fitted per (type, option-count bucket)
-on a held-out 10\% of the \emph{training} cases. The test set holds 400 cases
-and 2000 questions. Our RL+CE replica reaches accuracy $0.773\pm0.002$ and
-Brier $0.054\pm0.001$, against 0.766 and 0.062 in Laya's README.
+We replicate Laya's typed-decisions fine-tune on rented GPUs. Every run starts
+from \texttt{convaiinnovations/laya}~\cite{laya_hf}, trains for 4 epochs at
+effective batch 64, and uses AdamW with learning rate $2.5\cdot10^{-5}$ on the
+encoder and $10^{-4}$ on the head, cosine decay, gradient clipping at 1.0,
+$G{=}4$, $\sigma$ annealed from 0.4 to 0.1, and bf16. The loss is the only
+thing that changes: CE-only ($w_\mathrm{rl}{=}0$), Laya's RL+CE, RL-only
+($w_\mathrm{ce}{=}0$), RL+CE at fixed $\sigma\in\{0.25,0.5,1,2,3,4\}$, and an
+E4 sweep of the reward terms. CE-only, RL+CE, RL-only and every $\sigma\le2$
+were run with three seeds; the rest with one. All runs share a fixed budget
+and are evaluated on their final weights, with temperature fitted per (type,
+option-count bucket) on a held-out 10\% of the \emph{training} cases. The test
+set holds 400 cases and 2000 questions. Our RL+CE replica reaches accuracy
+$0.773\pm0.002$ and Brier $0.054\pm0.001$, against 0.766 and 0.062 in Laya's
+README. One further run (``CE-only, 1024/256'') doubles the input budget to
+the 1024 tokens the checkpoint card documents, against the 512 the port
+otherwise uses.
 
 One caveat about the benchmark changes how the numbers should be read. The
 gold label of each question equals $\argmax_i t_i$ on 98.4\% of test rows: it
@@ -411,17 +424,17 @@ model appears under-confident, because the labels are the teacher's mode.}
 \end{figure}
 
 \begin{table*}[t]
-\caption{E2 on the typed-decisions test set (mean $\pm$ std over seeds; $n$ = seeds). Target-referenced columns first; hard-label columns last.}
+\caption{E2/E4 on the typed-decisions test set (mean $\pm$ std over seeds; $n$ = seeds). Target-referenced columns first; hard-label columns last.}
 \label{tab:e2}
 \centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}lc cccc c ccc cc c@{}}
+\begin{tabular}{@{}lc cccc ccc cc c@{}}
 \toprule
- & & \multicolumn{4}{c}{vs.\ soft target $t$ (raw)} & post-$T$ & \multicolumn{3}{c}{fitted $T$} & \multicolumn{2}{c}{hard-label ECE} & \\
-\cmidrule(lr){3-6}\cmidrule(lr){8-10}\cmidrule(lr){11-12}
-Configuration & $n$ & $\overline{\max p}-\overline{\max t}$ & $\mathrm{ECE}_t$ & NLL & Brier & NLL & choice & score & noul & raw & post-$T$ & Acc. \\
+ & & \multicolumn{4}{c}{vs.\ soft target $t$ (raw)} & \multicolumn{3}{c}{fitted $T$} & \multicolumn{2}{c}{hard-label ECE} & \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-9}\cmidrule(lr){10-11}
+Configuration & $n$ & $\overline{\max p}-\overline{\max t}$ & NLL & Brier & post-$T$ NLL & choice & score & noul & raw & post-$T$ & Acc. \\
 \midrule
 \input{tables/e2_main.tex}
 \end{tabular}}
@@ -445,27 +458,28 @@ sharper than the targets.}
 \label{fig:temp}
 \end{figure}
 
-At fixed $\sigma$ the bias appears in full. Table~\ref{tab:e2} and
-Figs.~\ref{fig:ece}--\ref{fig:temp} show every target-referenced measure
-getting worse, monotonically. The sharpness gap moves from $+0.001$ to
-$+0.025$ to $+0.060$, and $\mathrm{ECE}_t$ from 0.054 to 0.080 to 0.111, or
-3.3$\times$ the CE-only value. Fitted $T$ rises for every type (binary: 1.22,
-1.38, 1.72), and NLL rises from 0.870 to 0.932. The three-seed spread at
-$\sigma{=}1$ is an order of magnitude smaller than these steps. Over the same
-runs hard-label ECE falls (0.114, 0.083, 0.056), exactly as the caveat
-predicts. Temperature scaling recovers most of the NLL loss (0.932 to 0.865 at
-$\sigma{=}2$), which points to a systematic sharpening rather than a degraded
-ranking, and accuracy is unchanged within noise.
+At fixed $\sigma$ the bias appears in full and keeps growing. Table~\ref{tab:e2}
+and Figs.~\ref{fig:ece}--\ref{fig:temp} show the target-referenced measures
+worsening with $\sigma$. Over $\sigma=0.5,1,2$ the sharpness gap goes
+$-0.002\to+0.025\to+0.051$, NLL $0.871\to0.890\to0.928$, and the fitted binary
+temperature $1.16\to1.38\to1.72$. Extending the sweep (Table~\ref{tab:sweep})
+to $\sigma=0.25,3,4$ keeps both NLL and fitted $T$ monotone across the whole
+range --- NLL $0.866,0.871,0.890,0.928,0.956,0.987$ and $T_\text{noul}$
+$1.14,1.16,1.38,1.72,2.08,2.42$ --- while accuracy is flat ($0.764$--$0.776$).
+The three-seed spread at $\sigma{=}1$ is an order of magnitude smaller than
+these steps. Over the same runs hard-label ECE falls ($0.115,0.083,0.060$),
+exactly as the caveat predicts, and temperature scaling recovers most of the
+NLL loss ($0.928$ to $0.863$ at $\sigma{=}2$) --- systematic sharpening, not a
+degraded ranking.
 
 At Laya's own schedule the RL term does nothing useful. RL+CE and CE-only are
-indistinguishable in sharpness ($-0.017$ vs $-0.016$), in $\mathrm{ECE}_t$
-(0.036 vs 0.034) and in fitted $T$. CE-only wins on NLL for every seed (0.861
-vs 0.866, and still 0.857 vs 0.863 after temperature scaling), on Brier (0.052
-vs 0.054) and on accuracy (0.782 vs 0.773). The one-seed RL-only run is the
-least accurate of all (0.760) but is not over-sharp. This fits the $O(\sigma^2)$
-remark: at $\sigma\le0.4$ the bias is too small to see, and what is left is
-estimator noise. The raw hard-label ECE prefers RL+CE (0.132 vs 0.139) for the
-reason given above.
+indistinguishable in sharpness ($-0.017$ vs $-0.016$) and in fitted $T$.
+CE-only wins on NLL for every seed ($0.861$ vs $0.866$, and still $0.857$ vs
+$0.863$ after temperature scaling), on Brier ($0.052$ vs $0.054$) and on
+accuracy ($0.782$ vs $0.773$). RL-only (three seeds now) is the least accurate
+($0.769$) but is not over-sharp. This fits the $O(\sigma^2)$ remark: at
+$\sigma\le0.4$ the bias is too small to see, and what is left is estimator
+noise.
 
 The sharpening is not uniform. Split by target-entropy tercile
 (Table~\ref{tab:entropy}), every model, CE-only included, is under-sharp on
@@ -485,6 +499,67 @@ Configuration & peaked & mid & flat \\
 \midrule
 \input{tables/e2_entropy.tex}
 \end{tabular}
+\end{table}
+
+The sequence budget is the only accuracy lever. The largest accuracy effect is
+not in the loss at all. Matching the 1024-token budget the checkpoint card
+documents (Table~\ref{tab:e2}, ``CE-only, 1024/256'') lifts accuracy from
+$0.7828\pm0.004$ to $0.7885$, and lowers Brier from $0.0515$ to $0.0495$ and
+NLL from $0.8612$ to $0.8581$ --- more than any loss term or reward weight
+below. This is the option-token starvation the model card warns about: this
+port shared a smaller option budget (192) than the checkpoint was built with
+(256), so questions with many options lost tokens.
+
+Reward weight trades calibration for nothing. At fixed $\sigma=1$, scaling the
+RL weight while holding CE fixed leaves accuracy flat but worsens every proper
+score monotonically (Table~\ref{tab:ratio}): Brier $0.061\to0.065\to0.066$ and
+NLL $0.882\to0.890\to0.898$ as $w_\mathrm{rl}=0.5,1,2$. No reward term earns its
+place under Laya's schedule either (Table~\ref{tab:e4}): accuracy $0.777$ (log
+only), $0.774$ (log+sph), $0.768$ (log+RPS) and $0.773$ (full).
+
+\begin{table}[t]
+\caption{Fixed-$\sigma$ sweep (RL+CE; one seed above $\sigma{=}2$): fitted temperature and NLL rise monotonically, accuracy does not.}
+\label{tab:sweep}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+Configuration & $n$ & gap & Brier & NLL & $T_\text{noul}$ & $T_\text{choice}$ & $T_\text{score}$ & Acc. \\
+\midrule
+\input{tables/e2_sweep.tex}
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\caption{RL weight at fixed $\sigma=1$ (CE fixed): accuracy flat, proper scores worsen monotonically with $w_\mathrm{rl}$.}
+\label{tab:ratio}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+Configuration & $n$ & gap & Brier & NLL & $T_\text{noul}$ & $T_\text{choice}$ & $T_\text{score}$ & Acc. \\
+\midrule
+\input{tables/e2_ratio.tex}
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\caption{E4 reward composition under Laya's schedule: no term changes accuracy beyond noise.}
+\label{tab:e4}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+Configuration & $n$ & gap & Brier & NLL & $T_\text{noul}$ & $T_\text{choice}$ & $T_\text{score}$ & Acc. \\
+\midrule
+\input{tables/e4_reward.tex}
+\end{tabular}}
 \end{table}
 
 \subsection{E3: Gradient quality}
