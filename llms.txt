@@ -1,0 +1,17 @@
+# Sev
+
+> Sev is a reproduction and clean-room analysis of RLCD (Reinforcement Learning for Calibrated Decisions), the training method behind typed-decision models such as TypeSafe's Jev and its open reproduction, Laya. It reports that Laya's RL term is an evolution-strategies estimate of the gradient of a noise-smoothed proper scoring rule, that its optimum is over-sharp at inference, and that plain cross-entropy matches it on every proper score; the only accuracy lever found was the input option-token budget.
+
+## Key facts
+
+- Laya's RL term estimates the gradient of `E_ε[R(softmax(z+ε))]`; as the noise `σ → 0` this equals the cross-entropy gradient the model already has.
+- Fitted temperature rises monotonically with `σ` (1.14 at 0.25 to 2.42 at 4); the noise-free prediction inference reports is over-sharp (at σ=2, +0.108 versus the target, while the noise-averaged prediction is within −0.006).
+- Across a 30-run ablation, CE-only is at least as good as RL+CE on Brier, NLL and accuracy.
+- The one change that raised accuracy was the input option-token budget: typed-decisions 0.782 → 0.789, and Banking77 (77 options) 15.8% → 31.2%.
+
+## Links
+
+- [Paper (IEEE PDF)](https://github.com/LakoreAI/sev/blob/main/docs/paper/main.pdf): the full report, proof, and tables.
+- [Repository](https://github.com/LakoreAI/sev): code, configs, and per-run result files.
+- [Model card](https://huggingface.co/LakoreAI/sev): the best checkpoint (CE-only, 1024/256) with fitted temperatures.
+- [All checkpoints and metrics](https://huggingface.co/minhleduc/rlcd-e2-checkpoints)

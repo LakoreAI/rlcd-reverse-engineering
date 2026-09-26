@@ -1,14 +1,22 @@
 # Sev
 
-**Sev** is a reproduction and clean-room analysis of RLCD, the training method
-behind typed-decision models.
+**Sev** is a reproduction and clean-room analysis of RLCD (Reinforcement
+Learning for Calibrated Decisions), the training method behind typed-decision
+models such as TypeSafe's Jev and its open reproduction, Laya.
 
-The report's finding: Laya's RL term is an evolution-strategies estimate of the
+**Atomic answer:** Laya's RL term is an evolution-strategies estimate of the
 gradient of a noise-smoothed proper scoring rule. As the noise vanishes it
 equals the cross-entropy gradient the model already computes; at real noise
 levels it makes inference over-confident. Across 30 runs, plain cross-entropy
 matched or beat it on every proper score, and the only thing that raised
 accuracy was the input token budget.
+
+**TL;DR**
+
+- The RL term is a smoothed cross-entropy gradient; as σ → 0 it *is* the CE gradient.
+- Its smoothed optimum is provably over-sharp at inference; the fitted temperature rises 1.14 → 2.42 as the noise scale goes 0.25 → 4.
+- 30-run ablation: CE-only is at least as good as RL+CE on Brier, NLL and accuracy.
+- The only accuracy lever is the input option-token budget (typed decisions 0.782 → 0.789; Banking77 15.8% → 31.2%).
 
 Start here:
 
@@ -27,7 +35,7 @@ Start here:
   tooling: HF export/fetch, the σ sweep, the reward-weight ratio, E4, E5, the
   noise-averaging probe, and paired-bootstrap statistics.
 
-## Results and model
+## Results: what does the RL term do?
 
 The report's central result: Laya's RL term is a score-function
 (evolution-strategies) estimator of the gradient of a noise-smoothed proper
@@ -194,6 +202,33 @@ wandb: {enabled: false, project: sev}
 
 Everything else — checkpoint schema, CLI, W&B/early-stopping/best-checkpoint
 callbacks, test structure — keeps working.
+
+## FAQ
+
+**Is RL needed to calibrate typed decisions?** No. Soft cross-entropy against
+good target distributions is already a proper-score optimum; the RL term is a
+noisy estimate of the same gradient and does not beat CE on calibration or
+accuracy.
+
+**What actually improves accuracy?** The input option-token budget. Matching the
+checkpoint's 1024-token context and 256-token option budget raised
+typed-decisions accuracy from 0.782 to 0.789, and roughly doubled zero-shot
+accuracy on the 77-option Banking77 task.
+
+**Why does the fitted temperature matter?** A value above 1 means the raw
+outputs are over-sharp. It rises with the training noise scale, so temperature
+scaling is undoing the RL objective rather than just cleaning up after it.
+
+## Citation
+
+```bibtex
+@misc{leduc2026sev,
+  title  = {Dissecting RLCD: What Reinforcement Learning Does (and Doesn't) Do for Calibrated Typed Decisions},
+  author = {Le Duc Minh},
+  year   = {2026},
+  url    = {https://github.com/LakoreAI/sev}
+}
+```
 
 ## License
 

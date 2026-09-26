@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+title: "Dissecting RLCD: What Reinforcement Learning Does (and Doesn't) Do for Calibrated Typed Decisions"
+authors:
+  - family-names: Le
+    given-names: Duc Minh
+date-released: 2026-09-26
+url: "https://github.com/LakoreAI/sev"
+license: MIT
+keywords:
+  - RLCD
+  - calibration
+  - typed decisions
+  - proper scoring rules
+  - reinforcement learning
+  - ModernBERT
+  - Jev
+  - Laya
